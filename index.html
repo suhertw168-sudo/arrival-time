@@ -212,12 +212,17 @@ async function apiGet(){
   const u=new URL(API_URL);u.searchParams.set('t',Date.now());
   const r=await fetch(u);return r.json();
 }
+const NET_MSG='連不到 Google Sheet（Failed to fetch）。常見原因：Apps Script 部署的「誰可以存取」不是「所有人」，或修改程式後沒有重新部署新版本。';
 async function apiPost(body){
-  const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
-  const d=await r.json();
-  if(!d.ok)throw new Error(d.error||'伺服器錯誤');
+  let r;
+  try{r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),redirect:'follow'})}
+  catch(e){const err=new Error(NET_MSG);err.net=true;throw err}
+  let d;try{d=await r.json()}catch(e){throw new Error('Google Sheet 回傳的不是資料（可能需要重新授權或重新部署）。HTTP '+r.status)}
+  if(!d.ok)throw new Error('Google Sheet 回報錯誤：'+(d.error||'未知'));
   return d;
 }
+// 送出後若瀏覽器收不到回應，重新讀一次確認資料到底有沒有寫進去
+async function verify(check){try{const d=await apiGet();return d.ok&&check(d)}catch(e){return false}}
 function setSync(t,err){const el=$('#sync');el.textContent=t;el.classList.toggle('err',!!err)}
 async function loadData(){
   if(!API_URL){$('#setup').hidden=false;setSync('未設定資料庫',true);renderAll();return}
@@ -228,7 +233,7 @@ async function loadData(){
     saved=d.tables;aliases=d.aliases;
     setSync('資料更新於 '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));
     renderAll();
-  }catch(e){console.error(e);setSync('讀取失敗，請檢查網路後按「重新整理」',true)}
+  }catch(e){console.error(e);setSync('讀取失敗：連不到 Google Sheet，請確認部署的存取權是「所有人」',true)}
 }
 // 給 Google Sheet「明細」工作表的一列一筆資料
 function flatRows(b){const out=[];
@@ -236,7 +241,12 @@ function flatRows(b){const out=[];
   return out}
 async function saveTable(rec){
   const rows=flatRows(rec);
-  await apiPost({action:'save',table:{...rec,pieces:rows.reduce((a,r)=>a+r[9],0)},rows});
+  try{await apiPost({action:'save',table:{...rec,pieces:rows.reduce((a,r)=>a+r[9],0)},rows})}
+  catch(e){
+    if(!e.net)throw e;
+    const ok=await verify(d=>d.tables.some(t=>t.id===rec.id&&t.label===rec.label&&(t.arrival||'')===(rec.arrival||'')&&JSON.stringify(t.grid)===JSON.stringify(rec.grid)));
+    if(!ok)throw e;
+  }
   const i=saved.findIndex(b=>b.id===rec.id);if(i>=0)saved[i]=rec;else saved.push(rec);
 }
 async function busy(btn,fn){if(btn)btn.disabled=true;try{return await fn()}catch(e){alert(e.message||'儲存失敗');return false}finally{if(btn)btn.disabled=false}}
@@ -909,7 +919,8 @@ function renderSaved(){
       if(reviews.some(r=>r.editingId===b.id))return document.getElementById('rv-'+reviews.find(r=>r.editingId===b.id).id).scrollIntoView();
       const rv={id:'e'+Date.now(),editingId:b.id,label:b.label,created:b.created,arrival:b.arrival||'',grid:b.grid.map(r=>[...r]),fixed:{}};reviews.push(rv);renderReview(rv)};
     li.querySelector('[data-act=del]').onclick=e=>{if(!confirm(`確定刪除「${b.label}」？客服那邊也會查不到。`))return;
-      busy(e.currentTarget,async()=>{await apiPost({action:'delete',id:b.id});saved=saved.filter(x=>x!==b);renderAll()})};
+      busy(e.currentTarget,async()=>{
+        try{await apiPost({action:'delete',id:b.id})}catch(err){if(!err.net||!await verify(d=>!d.tables.some(t=>t.id===b.id)))throw err}saved=saved.filter(x=>x!==b);renderAll()})};
     ul.appendChild(li)});
 }
 function renderAliases(){
