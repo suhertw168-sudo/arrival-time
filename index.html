@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>到貨查詢</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#EEF1F4;--panel:#FFFFFF;--ink:#16202A;--muted:#5B6773;--line:#CBD3DB;--chip:#DCE2E8;
+  --tape:#E9A31A;--tape-ink:#2E1F00;--bad:#B8321C;--bad-bg:#FBE1DB;--ok:#2B7347;--ok-bg:#DCF0E3;
+  --fix:#6E5200;--fix-bg:#FFF0C2;--head:#E3E8ED;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#10151B;--panel:#18202A;--ink:#E5EAEF;--muted:#98A4B0;--line:#2D3946;--chip:#25303C;
+    --tape:#E9A31A;--tape-ink:#1C1300;--bad:#FF8C75;--bad-bg:#3A1D17;--ok:#7CD49D;--ok-bg:#15301F;
+    --fix:#F2D27A;--fix-bg:#3A2F10;--head:#202A35;color-scheme:dark}
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:2rem;font-weight:900;letter-spacing:.02em;margin:0}
+h2{font-size:1.15rem;font-weight:700;margin:0 0 12px}
+p{margin:0}
+.lede{color:var(--muted);margin-top:4px;max-width:46em}
+section{margin-top:28px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:.4em .9em}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:700}
+button.danger{color:var(--bad)}
+button:focus-visible,input:focus-visible,select:focus-visible,[contenteditable]:focus-visible,label.drop:focus-within{outline:3px solid var(--tape);outline-offset:2px}
+input[type=search],select{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:.45em .7em;min-width:0}
+
+/* upload */
+label.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:130px;
+  border:2px dashed var(--line);border-radius:10px;background:var(--panel);cursor:pointer;text-align:center;padding:18px}
+label.drop.over{border-color:var(--tape);background:var(--fix-bg)}
+label.drop strong{font-size:1.1rem}
+label.drop span{color:var(--muted);font-size:.9rem}
+label.drop input{position:absolute;opacity:0;width:1px;height:1px}
+#status{margin-top:10px;color:var(--muted);min-height:1.6em}
+.bar{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;margin-top:6px;display:none}
+.bar i{display:block;height:100%;width:0;background:var(--tape);transition:width .2s}
+
+/* review */
+.review{margin-top:16px}
+.review header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}
+.review header h3{margin:0;font-size:1.05rem}
+.pill{display:inline-block;font-size:.85rem;padding:.15em .7em;border-radius:99px;font-weight:500}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+details.src{margin-bottom:10px}
+details.src summary{cursor:pointer;color:var(--muted);font-size:.9rem}
+details.src img{max-width:100%;margin-top:8px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums}
+table.grid th,table.grid td{border:1px solid var(--line);padding:3px 8px;min-width:46px;text-align:right;white-space:nowrap}
+table.grid th{background:var(--head);text-align:center;font-weight:700}
+table.grid td.name{text-align:left;min-width:90px}
+table.grid th.t-ignore{color:var(--muted);text-decoration:line-through}
+table.grid th.t-total,table.grid td.c-total{font-weight:700}
+table.grid tr.sumrow td{background:var(--head);font-weight:700}
+table.grid .bad{background:var(--bad-bg)!important;color:var(--bad);font-weight:700}
+table.grid .warn{background:var(--fix-bg)!important;color:var(--fix)}
+table.grid .fixed{background:var(--fix-bg);box-shadow:inset 0 -2px 0 var(--tape)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.85rem;color:var(--muted);margin:10px 0}
+.legend b{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+/* query */
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:3px;font-size:.85rem;font-weight:500;color:var(--muted)}
+.field input,.field select{font-size:1rem;color:var(--ink)}
+.field.grow{flex:1 1 220px}
+.tagrow{display:flex;gap:12px;align-items:flex-start;margin-top:14px}
+.tagrow .flabel{font-size:.85rem;font-weight:500;color:var(--muted);padding-top:.35em;flex:none}
+label.arr{display:inline-flex;align-items:center;gap:6px;font-size:.9rem;color:var(--muted)}
+label.arr input{width:6.5em;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:.25em .5em;color:var(--ink);font-weight:700}
+label.arr input.missing{background:var(--bad-bg);border-color:var(--bad)}
+.review .fmt{color:var(--muted);font-size:.85rem;flex-basis:100%}
+.review header .left{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+.tags{display:flex;flex-wrap:wrap;gap:8px}
+.tag{position:relative;border:0;border-radius:0 6px 6px 0;background:var(--chip);padding:.3em .85em .3em 1.45em;font-weight:700;
+  clip-path:polygon(11px 0,100% 0,100% 100%,11px 100%,0 50%);min-width:56px}
+.tag::before{content:"";position:absolute;left:9px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--bg)}
+.tag[aria-pressed="true"]{background:var(--tape);color:var(--tape-ink)}
+.tag.clear{background:transparent;clip-path:none;padding-left:.85em;font-weight:500;color:var(--muted);text-decoration:underline}
+.tag.clear::before{display:none}
+.summary{margin:16px 0 8px;font-weight:500}
+.summary em{font-style:normal;font-size:1.4rem;font-weight:900}
+table.res{width:100%;background:var(--panel)}
+table.res th,table.res td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:right;white-space:nowrap}
+table.res th{position:sticky;top:0;background:var(--head);font-weight:700;text-align:right}
+table.res th.l,table.res td.l{text-align:left}
+table.res td.zero{color:var(--line)}
+table.res td.hit{font-weight:700}
+table.res tfoot td{font-weight:900;border-top:2px solid var(--ink);border-bottom:0}
+table.res td.tot{font-weight:700}
+table.res .tagnote{color:var(--muted);font-weight:400}
+.empty{color:var(--muted);padding:24px 0}
+label.chk{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+
+/* saved */
+ul.saved{list-style:none;margin:0;padding:0}
+ul.saved li{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+ul.saved li:last-child{border-bottom:0}
+#aliases input{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:.3em .5em;flex:1 1 140px;min-width:0}
+#aliases span{color:var(--muted)}
+ul.saved > li > input{border:1px solid transparent;background:transparent;border-radius:6px;padding:.2em .4em;font-weight:700;flex:1 1 200px;min-width:0}
+ul.saved > li > input:hover{border-color:var(--line)}
+ul.saved small{color:var(--muted)}
+header.top{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end;justify-content:space-between}
+.topbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sync{color:var(--muted);font-size:.85rem}
+.sync.err{color:var(--bad);font-weight:700}
+.setup{margin-top:20px;background:var(--fix-bg);color:var(--fix);border-color:var(--tape)}
+.buyer-only{display:none}
+body.buyer .buyer-only{display:block}
+body.buyer #modeBtn{background:var(--tape);color:var(--tape-ink);border-color:var(--tape)}
+button[disabled]{opacity:.5;cursor:wait}
+@media (max-width:600px){h1{font-size:1.6rem}.wrap{padding:20px 14px 48px}}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div><h1>到貨查詢</h1><p class="lede" id="modeText">客服模式：查詢品號、顏色、尺寸的到貨數量。</p></div>
+    <div class="topbar"><span id="sync" class="sync" role="status" aria-live="polite"></span>
+      <button id="refresh">重新整理</button><button id="modeBtn" class="primary">切換到採購模式</button></div>
+  </header>
+  <div id="setup" class="panel setup" hidden>還沒設定資料庫網址。請在 index.html 最前面的 <code>API_URL</code> 填入 Apps Script 部署網址。</div>
+
+  <section class="buyer-only">
+    <h2>上傳到貨明細</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".xlsx,.xls,.csv,image/*" multiple>
+      <strong>選擇或拖曳 Excel 檔（建議）或表格截圖</strong>
+      <span>也可以在 Excel 選取表格按 Ctrl+C，回到這裡按 Ctrl+V 直接貼上</span>
+    </label>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div class="bar" id="bar"><i></i></div>
+    <div id="reviews"></div>
+  </section>
+
+  <section>
+    <h2>查詢</h2>
+    <div class="panel">
+      <div class="controls">
+        <label class="field">品號<select id="product"></select></label>
+        <label class="field grow">顏色<input type="search" id="q" list="colorList" placeholder="輸入或選擇顏色、色號，例如：白、藍、04"></label>
+        <label class="field">到貨時間<select id="arrival"></select></label>
+        <label class="chk"><input type="checkbox" id="hideEmpty" checked> 只列有數量的</label>
+        <button id="csv">匯出 CSV</button>
+      </div>
+      <datalist id="colorList"></datalist>
+      <div class="tagrow"><span class="flabel">尺寸</span><div class="tags" id="tags" aria-label="尺寸篩選"></div></div>
+      <div id="result"></div>
+    </div>
+  </section>
+
+  <section class="buyer-only">
+    <h2>已上傳的表格</h2>
+    <div class="panel"><ul class="saved" id="saved"></ul></div>
+  </section>
+
+  <section class="buyer-only">
+    <h2>品號對照</h2>
+    <div class="panel">
+      <p class="lede" style="margin:0 0 10px">品名裡包含左邊的文字，就當成右邊的品號查詢。</p>
+      <ul class="saved" id="aliases"></ul>
+      <div class="actions"><button id="addAlias">新增對照</button></div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ---------- constants ---------- */
+const SIZE_ORDER=['XXS','XS','S','M','L','XL','2XL','3XL','4XL','5XL','6XL','7XL','8XL','F','JXS','JS','JM','JL','JXL','J2XL','J3XL'];
+const SUM_RE=/數量|数量|合計|合计|總計|总计|小計|小计|總數|总数|總和|总和|汇总|匯總|TOTAL|^SUM$/i;
+const CODE_RE=/色號|色号|色碼|色码|編號|代號|颜色编码|顏色編碼/;
+const STORE='sizeTableLookup.v1';
+const $=s=>document.querySelector(s);
+
+/* ---------- storage ---------- */
+/* ======== 設定：貼上 Apps Script「網頁應用程式」部署網址 ======== */
+const API_URL='';
+/* ================================================================ */
+let saved=[];
+const pad=n=>String(n).padStart(2,'0');
+function toISO(mo,d,ref){if(!(mo>=1&&mo<=12&&d>=1&&d<=31))return'';ref=ref||new Date();let y=ref.getFullYear();const rm=ref.getMonth()+1;
+  if(mo-rm>6)y--;else if(rm-mo>6)y++;return`${y}-${pad(mo)}-${pad(d)}`}
+// 檔名中的「1022到」、「10/22到」、「10月22日到」
+function parseArrival(name,ref){const s=String(name||'');
+  const m=s.match(/(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})\s*日?\s*到/)||s.match(/(?:^|\D)(\d{1,2})(\d{2})\s*到/);
+  return m?toISO(+m[1],+m[2],ref):''}
+// 手動輸入：10/22、1022、10-22、10月22日
+function parseMD(v,ref){v=String(v||'').trim().replace(/到$/,'');
+  const m=v.match(/^(\d{1,2})\D+(\d{1,2})\D*$/)||v.match(/^(\d{1,2})(\d{2})$/);return m?toISO(+m[1],+m[2],ref):''}
+function fmtMD(iso){if(!iso)return'';const[,m,d]=iso.split('-');return`${+m}/${+d}`}
+/* ---------- 雲端資料（Google Sheet） ---------- */
+const store={get(k,t){try{return(t||localStorage).getItem(k)||''}catch(e){return''}},set(k,v,t){try{v?(t||localStorage).setItem(k,v):(t||localStorage).removeItem(k)}catch(e){}}};
+const sess={buyer:store.get('mode',sessionStorage)==='buyer'};
+async function apiGet(){
+  const u=new URL(API_URL);u.searchParams.set('t',Date.now());
+  const r=await fetch(u);return r.json();
+}
+async function apiPost(body){
+  const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!d.ok)throw new Error(d.error||'伺服器錯誤');
+  return d;
+}
+function setSync(t,err){const el=$('#sync');el.textContent=t;el.classList.toggle('err',!!err)}
+async function loadData(){
+  if(!API_URL){$('#setup').hidden=false;setSync('未設定資料庫',true);renderAll();return}
+  setSync('讀取中…');
+  try{
+    const d=await apiGet();
+    if(!d.ok)throw new Error(d.error);
+    saved=d.tables;aliases=d.aliases;
+    setSync('資料更新於 '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));
+    renderAll();
+  }catch(e){console.error(e);setSync('讀取失敗，請檢查網路後按「重新整理」',true)}
+}
+// 給 Google Sheet「明細」工作表的一列一筆資料
+function flatRows(b){const out=[];
+  for(const r of extract(b).rows)for(const [sz,q] of Object.entries(r.q))out.push([b.id,b.label,b.arrival||'',r.product,r.tag||'',r.rawProduct||'',r.color,r.code||'',sz,q]);
+  return out}
+async function saveTable(rec){
+  const rows=flatRows(rec);
+  await apiPost({action:'save',table:{...rec,pieces:rows.reduce((a,r)=>a+r[9],0)},rows});
+  const i=saved.findIndex(b=>b.id===rec.id);if(i>=0)saved[i]=rec;else saved.push(rec);
+}
+async function busy(btn,fn){if(btn)btn.disabled=true;try{return await fn()}catch(e){alert(e.message||'儲存失敗');return false}finally{if(btn)btn.disabled=false}}
+function setMode(){
+  document.body.classList.toggle('buyer',sess.buyer);
+  $('#modeBtn').textContent=sess.buyer?'切換到客服模式':'切換到採購模式';
+  $('#modeText').textContent=sess.buyer?'採購模式：上傳到貨明細、修改或刪除表格。':'客服模式：查詢品號、顏色、尺寸的到貨數量。';
+}
+function toggleMode(){sess.buyer=!sess.buyer;store.set('mode',sess.buyer?'buyer':'',sessionStorage);setMode();renderAll()}
+
+/* ---------- helpers ---------- */
+const PRODUCT_RE=/品號|品号|品名|款號|款号|款式|款名|貨號|货号|貨品|货品|型號|型号|商品名|商品編碼|商品编码|名稱|名称|STYLE|SKU/i;
+const COLOR_RE=/顏色|颜色|顏|颜|色名|色系|COLOU?R/i;
+function normSize(t){
+  if(!t)return null;
+  let s=String(t).toUpperCase().trim().replace(/\(.*?\)|（.*?）/g,'').split(/[\/／]/)[0].replace(/[碼码號号]$/,'');
+  s=s.replace(/[\s.,·:;'"`()（）|_\-]/g,'');
+  if(/^(均|均碼|均码|FREE|FREESIZE|ONESIZE|OS|單一尺寸|单一尺寸)$/.test(s))return'F';
+  s=s.replace(/^JXXXL$/,'J3XL').replace(/^JXXL$/,'J2XL');
+  s=s.replace(/^Z/,'2').replace(/^XXXXXL$/,'5XL').replace(/^XXXXL$/,'4XL').replace(/^XXXL$/,'3XL').replace(/^XXL$/,'2XL').replace(/^([2-8])X$/,'$1XL');
+  s=s.replace(/^S(XL)$/,'5$1').replace(/^[1I](S|M|L|XL)$/,'J$1').replace(/^[1IJ]8$/,'JS').replace(/^5$/,'S');
+  return SIZE_ORDER.includes(s)?s:null;
+}
+function classify(t){
+  t=(t||'').trim();
+  if(SUM_RE.test(t))return{type:'total'};
+  if(CODE_RE.test(t))return{type:'code'};
+  if(COLOR_RE.test(t))return{type:'color'};
+  if(PRODUCT_RE.test(t))return{type:'product'};
+  const s=normSize(t)||numSize(t);
+  return s?{type:'size',size:s}:{type:'ignore'};
+}
+// 數字尺碼（褲子 28、30，童裝 90、100、110）
+function numSize(t){const m=String(t||'').trim().match(/^(\d{2,3})\s*(CM|碼|码|號|号)?$/i);return m?m[1]:null}
+function num(t){t=(t||'').replace(/[,，\s]/g,'');if(t==='')return null;return /^\d+$/.test(t)?parseInt(t,10):NaN}
+function sizeIdx(s){const i=SIZE_ORDER.indexOf(s);if(i>=0)return i;return /^\d+$/.test(s)?100+Number(s):9999}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function cleanCode(t){
+  const m=String(t||'').toUpperCase().match(/[A-Z0-9][A-Z0-9\-_.\/()]*[A-Z0-9)]/g);
+  if(!m)return t;const best=m.sort((x,y)=>y.length-x.length)[0];return best.length>=3?best:t;
+}
+// 表格結構：哪一欄是品號、顏色、色號、尺寸、合計
+function layout(g){
+  const types=g[0].map(classify);
+  let colorCol=types.findIndex(t=>t.type==='color');
+  const productCol=types.findIndex(t=>t.type==='product');
+  let title='';
+  if(colorCol<0){
+    if(productCol===0&&types.length>1){colorCol=1;types[1]={type:'color'}}
+    else{colorCol=0;title=(g[0][0]||'').trim();types[0]={type:'color'}}
+  }
+  const sizeCols=types.map((t,c)=>t.type==='size'?c:-1).filter(c=>c>=0);
+  const totalCol=types.findIndex(t=>t.type==='total');
+  const codeCol=types.findIndex(t=>t.type==='code');
+  return{types,colorCol,productCol,codeCol,title,sizeCols,totalCol};
+}
+function isText(L,c){return c===L.colorCol||c===L.productCol}
+
+/* ---------- 品號對照、簡繁 ---------- */
+const ALIAS_KEY='sizeTableLookup.alias.v1';
+let aliases=[];
+let aliasTimer=null;
+function saveAliases(){clearTimeout(aliasTimer);aliasTimer=setTimeout(()=>{
+  apiPost({action:'aliases',aliases:aliases.filter(a=>a.match&&a.to)}).then(()=>setSync('品號對照已儲存')).catch(e=>alert(e.message))},600)}
+// 「AG15000订单」→ 品號 AG15000、類別 订单
+function splitProduct(p){p=String(p||'').trim();const m=p.match(/^([A-Za-z]{1,5}[-_]?[A-Za-z]?\d{2,}[A-Za-z]?)\s*([^A-Za-z0-9].*)$/);
+  return m?{code:m[1].toUpperCase(),tag:m[2].trim()}:{code:p,tag:''}}
+function aliasProduct(p){p=p||'';for(const a of aliases)if(a.match&&a.to&&p.includes(a.match))return a.to;return p}
+const S2T=Object.fromEntries('红紅浅淺蓝藍绿綠黄黃银銀铁鐵雾霧宝寶军軍驼駝杂雜烟煙艳豔乌烏砖磚枣棗藓蘚癣癬极極质質钢鋼兰蘭肤膚条條纹紋麦麥咖咖卧臥荧螢粉粉橙橙岩岩酱醬卡卡'.match(/../g).map(x=>[x[0],x[1]]));
+function nz(s){return String(s||'').toLowerCase().replace(/[\s()（）]/g,'').replace(/./g,c=>S2T[c]||c)}
+
+/* ---------- Excel / 貼上表格 ---------- */
+const BLANK_RE=/^[（(]?(空白|blank)[)）]?$/i;
+const SUBTOTAL_RE=/^(.+?)\s*(汇总|匯總|小計|小计|合計|合计|TOTAL)$/i;
+const SIZEHEAD_RE=/^(尺寸|尺碼|尺码|碼數|码数|規格|规格|SIZE)$/i;
+const QTYHEAD_RE=/數量|数量|件數|件数|QTY|PCS|訂量|订量/i;
+const ARRHEAD_RE=/到貨|到货|交期|ETA/i;
+const ROWLABEL_RE=/行标签|行標籤|列標籤|列标签|ROW ?LABELS/i;
+function cellStr(v){if(v==null)return'';if(typeof v==='number')return String(Math.round(v*1000)/1000);const t=String(v).trim();return BLANK_RE.test(t)?'':t}
+// 任何日期寫法 → ISO：Excel 日期序號、2026/10/22、10/22、1022、10月22日
+function parseAnyDate(v,ref){
+  const t=String(v||'').trim();if(!t)return'';
+  if(/^\d{5}(\.\d+)?$/.test(t)&&typeof XLSX!=='undefined'){const d=XLSX.SSF.parse_date_code(+t);if(d&&d.y>2000)return`${d.y}-${pad(d.m)}-${pad(d.d)}`}
+  let m=t.match(/(20\d{2})\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/);if(m)return`${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  return parseMD(t.replace(/[日號号]/g,''),ref)||parseArrival(t,ref)||parseArrival(t+'到',ref);
+}
+function isHeaderRow(r){
+  const alpha=r.filter(c=>c&&!/^\d+$/.test(c)&&normSize(c)).length;
+  if(alpha>=2)return true;
+  const nums=r.filter(c=>numSize(c)).length;
+  return nums>=3&&r.some(c=>c&&(COLOR_RE.test(c)||PRODUCT_RE.test(c)||SIZEHEAD_RE.test(c)||ROWLABEL_RE.test(c)||/尺|碼|码/.test(c)));
+}
+function padRows(rows){const n=Math.max(0,...rows.map(r=>r.length));return rows.map(r=>{const a=r.slice();while(a.length<n)a.push('');return a})}
+function transpose(rows){rows=padRows(rows);return rows[0]?rows[0].map((_,c)=>rows.map(r=>r[c])):[]}
+
+// 格式一：直式明細（每列一個尺寸：品號／顏色／尺寸／數量）
+function tryLong(rows,ref){
+  for(let h=0;h<Math.min(rows.length,40);h++){
+    const r=rows[h].map(c=>c.replace(/\s/g,''));
+    const si=r.findIndex(c=>SIZEHEAD_RE.test(c)),qi=r.findIndex(c=>QTYHEAD_RE.test(c)&&!SIZEHEAD_RE.test(c));
+    const ci=r.findIndex(c=>COLOR_RE.test(c)&&!CODE_RE.test(c));
+    if(si<0||qi<0||ci<0)continue;
+    const pi=r.findIndex(c=>PRODUCT_RE.test(c)),ki=r.findIndex(c=>CODE_RE.test(c)),ai=r.findIndex(c=>ARRHEAD_RE.test(c));
+    const byArr=new Map();let lastP='',lastC='',lastA='';
+    for(let i=h+1;i<rows.length;i++){
+      const x=rows[i];const sz=normSize(x[si])||numSize(x[si]);const q=num(x[qi]);
+      if(pi>=0&&x[pi])lastP=x[pi];if(x[ci])lastC=x[ci];if(ai>=0&&x[ai])lastA=parseAnyDate(x[ai],ref);
+      if(!sz||!q||Number.isNaN(q))continue;
+      const key=[lastP,lastC,ki>=0?x[ki]:''].join('|');
+      if(!byArr.has(lastA))byArr.set(lastA,{sizes:new Set(),rows:new Map()});
+      const T=byArr.get(lastA);T.sizes.add(sz);
+      if(!T.rows.has(key))T.rows.set(key,{p:lastP,c:lastC,k:ki>=0?x[ki]:'',q:{}});
+      const o=T.rows.get(key);o.q[sz]=(o.q[sz]||0)+q;
+    }
+    if(!byArr.size)continue;
+    const out=[];
+    for(const [arr,T] of byArr){
+      const sizes=[...T.sizes].sort((a,b)=>sizeIdx(a)-sizeIdx(b));
+      const head=[...(pi>=0?['品號']:[]),'顏色',...(ki>=0?['色號']:[]),...sizes,'合計'];
+      const g=[head];
+      for(const o of T.rows.values()){const v=sizes.map(z=>o.q[z]?String(o.q[z]):'');
+        g.push([...(pi>=0?[o.p]:[]),o.c,...(ki>=0?[o.k]:[]),...v,String(sizes.reduce((a,z)=>a+(o.q[z]||0),0))])}
+      out.push({grid:g,arrival:arr,title:'',format:'直式明細（每列一個尺寸）'+(byArr.size>1?'，依到貨日分開':'')});
+    }
+    return out;
+  }
+  return null;
+}
+// 表頭上方的說明列：款號、到貨日
+function readTitleLines(lines,ref){
+  let product='',arrival='';
+  for(const l of lines){
+    const m=l.match(/(?:款號|款号|品號|品号|貨號|货号|型號|型号|款式|品名)\s*[:：]?\s*([^\s,，;；]+)/);if(m&&!product)product=m[1];
+    const a=l.match(/(?:到貨|到货|交期|ETA)[^0-9]*([0-9][0-9\/\-.年月日]*)/i);if(a&&!arrival)arrival=parseAnyDate(a[1],ref);
+    if(!arrival){const b=parseArrival(l,ref);if(b)arrival=b}
+    if(!product&&/^[A-Za-z]{1,5}[-_]?[A-Za-z]?\d{2,}[A-Za-z0-9\-_()]*$/.test(l.trim()))product=l.trim();
+  }
+  return{product,arrival};
+}
+// 單一標籤欄的樞紐分析（品號、顏色擠在同一欄）→ 拆出品號欄
+function splitCompactGroups(g){
+  const L=layout(g);if(L.productCol>=0)return false;
+  const cc=L.colorCol,cols=[...L.sizeCols,...(L.totalCol>=0?[L.totalCol]:[])];
+  if(!cols.length)return false;
+  const vals=r=>cols.map(c=>num(g[r][c])||0);
+  const skip=r=>!g[r][cc]||SUM_RE.test(g[r][cc]);
+  const groups=[];let r=1;
+  while(r<g.length){
+    if(skip(r)){r++;continue}
+    const t=vals(r);let acc=cols.map(()=>0),k=-1;
+    for(let j=r+1;j<g.length&&!skip(j);j++){const v=vals(j);acc=acc.map((a,i)=>a+v[i]);
+      if(acc.some((a,i)=>a>t[i]))break;if(acc.every((a,i)=>a===t[i])){k=j;break}}
+    if(k>0&&t.some(Boolean)){groups.push([r,k]);r=k+1}else r++;
+  }
+  if(!groups.length)return false;
+  // 必須每一列都屬於某個品號群組，否則視為一般顏色表
+  const covered=new Set();groups.forEach(([a,b])=>{for(let i=a;i<=b;i++)covered.add(i)});
+  for(let i=1;i<g.length;i++)if(!skip(i)&&!covered.has(i))return false;
+  const code=t=>/[A-Za-z]/.test(t)&&/\d/.test(t);
+  if(groups.length<2&&!code(g[groups[0][0]][cc]))return false;
+  // 只有一個顏色的群組，品號必須像代號（英文＋數字），避免把數字剛好相同的顏色誤判成品號
+  if(groups.some(([a,b])=>b-a<2&&!code(g[a][cc])))return false;
+  const isG=new Set(groups.map(x=>x[0]));
+  for(let i=0;i<g.length;i++){
+    if(i===0){g[0].splice(cc,1,'品號','顏色');continue}
+    const lab=g[i][cc];
+    if(isG.has(i))g[i].splice(cc,1,lab,'');else if(SUM_RE.test(lab))g[i].splice(cc,1,lab,'');else g[i].splice(cc,1,'',lab);
+  }
+  return true;
+}
+// 從表頭那一列開始整理成網格
+function buildGrid(rows,title){
+  let g=padRows(rows).filter((r,i)=>i===0||r.some(Boolean));
+  const nC=g[0].length;
+  const keep=[...Array(nC).keys()].filter(c=>g.some(r=>r[c]));
+  g=g.map(r=>keep.map(c=>r[c]));
+  g[0]=g[0].map(t=>normSize(t)||numSize(t)||t);
+  // 第一欄若是「行標籤」或空白，換成款號標題或「顏色」
+  if(ROWLABEL_RE.test(g[0][0])||SIZEHEAD_RE.test(g[0][0])||!g[0][0])g[0][0]=title||'';
+  const firstSize=g[0].findIndex(t=>classify(t).type==='size');
+  const textCols=[...Array(firstSize<0?1:firstSize).keys()].filter(c=>classify(g[0][c]).type!=='code');
+  assignTextRoles(g,textCols);
+  let compact=splitCompactGroups(g);
+  autoFixHeaders(g);
+  const L=layout(g);
+  if(L.productCol<0&&title&&!L.title&&L.colorCol===0)g[0][0]=title;   // 用款號標題當品號
+  // 去掉表尾的備註、說明列
+  const L2=layout(g),nc=[...L2.sizeCols,L2.totalCol].filter(c=>c>=0);
+  g=g.filter((r,i)=>i===0||nc.some(c=>r[c])||!/備註|备注|說明|说明|注意|製表|制表|[:：]/.test(r.join('')));
+  return{g,compact};
+}
+// 找出每一列裡的表頭片段（同一列可能並排好幾個表格，中間隔兩格以上空白）
+function headerSegments(rows){
+  const segs=[];
+  rows.forEach((r,i)=>{
+    const idx=[];r.forEach((v,c)=>{if(v)idx.push(c)});
+    // 連續的儲存格才算同一段（並排的表格之間常只隔一欄空白）
+    const clusters=[];for(const c of idx){const last=clusters.at(-1);if(last&&c-last[1]===1)last[1]=c;else clusters.push([c,c])}
+    for(let [a,b] of clusters){
+      if(!isHeaderRow(r.slice(a,b+1)))continue;
+      // 合計欄前面若有一欄空白表頭（例如「(空白)」），把合計欄接上
+      if(!r[b+1]&&r[b+2]&&SUM_RE.test(r[b+2])&&!r[b+3])b+=2;
+      // 表頭左上角空白、但下面有顏色名稱時，往左包含進來
+      while(a>0&&!r[a-1]&&rows.slice(i+1,i+4).some(x=>x[a-1]&&!/^\d+$/.test(x[a-1]))&&!(r[a-2]))a--;
+      segs.push({row:i,a,b});
+    }
+  });
+  return segs;
+}
+function isSumRow(cells){const t=cells.find(Boolean)||'';return SUM_RE.test(t)}
+function parseRows(rows,ref){
+  rows=padRows(rows.map(r=>(r||[]).map(cellStr)));
+  const long=tryLong(rows,ref);if(long)return long;
+  let segs=headerSegments(rows),transposed=false;
+  if(!segs.length){const t=transpose(rows);const s2=headerSegments(t);if(s2.length){rows=t;segs=s2;transposed=true}}
+  // 同一欄位範圍連續兩列都像表頭時只取第一列
+  segs=segs.filter(sg=>!segs.some(o=>o.row===sg.row-1&&o.a<=sg.b&&o.b>=sg.a));
+  segs.sort((x,y)=>x.row-y.row||x.a-y.a);
+  const cut=(r,sg)=>rows[r].slice(sg.a,sg.b+1);
+  const out=[];
+  segs.forEach((sg,i)=>{
+    // 往下找這個表格的範圍：遇到空白列或另一個表頭就停（空白後緊接合計列則一併納入）
+    let end=sg.row+1;
+    for(;end<rows.length;end++){
+      if(segs.some(o=>o!==sg&&o.row===end&&o.a<=sg.b&&o.b>=sg.a))break;
+      const cells=cut(end,sg);
+      if(!cells.some(Boolean)){
+        let k=end+1;while(k<rows.length&&k<=end+2&&!cut(k,sg).some(Boolean))k++;
+        if(k<rows.length&&k<=end+2&&isSumRow(cut(k,sg))&&!segs.some(o=>o.row===k&&o.a<=sg.b&&o.b>=sg.a)){end=k+1}
+        break;
+      }
+    }
+    // 下一個表頭正上方的說明列不屬於這一段
+    while(end-1>sg.row){const cells=cut(end-1,sg).filter(Boolean);
+      const nextHead=segs.some(o=>o.row>=end&&o.row<=end+3&&o.a<=sg.b&&o.b>=sg.a);
+      if(nextHead&&cells.length&&cells.length<=3&&cells.filter(c=>/^\d+$/.test(c)).length<=1&&!isSumRow(cells))end--;else break}
+    // 表頭上方的說明列（款號、到貨日）
+    const lines=[];
+    for(let r=sg.row-1;r>=0&&r>=sg.row-4;r--){const cells=cut(r,sg).filter(Boolean);if(!cells.length)break;
+      if(cells.length>3||cells.filter(c=>/^\d+$/.test(c)).length>1||isSumRow(cells))break;lines.unshift(cells.join(' '))}
+    const info=readTitleLines(lines,ref);
+    const {g,compact}=buildGrid(rows.slice(sg.row,end).map(r=>r.slice(sg.a,sg.b+1)),info.product);
+    const L=layout(g);
+    const fmt=[transposed?'尺寸在左側（已轉置）':'',compact?'樞紐分析（品號、顏色同一欄）':L.productCol>=0?'品號＋顏色':'顏色表'+(L.title?'（款號：'+L.title+'）':''),segs.length>1?`第 ${i+1} 個表格，共 ${segs.length} 個`:''].filter(Boolean).join('，');
+    out.push({grid:g,arrival:info.arrival,title:info.product||L.title,format:fmt});
+  });
+  return out;
+}
+function sheetRows(ws){
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true,blankrows:true});
+  const rg=XLSX.utils.decode_range(ws['!ref']||'A1');
+  // 直向合併的儲存格（例如品號跨好幾列）往下填
+  for(const m of ws['!merges']||[]){
+    const r0=m.s.r-rg.s.r,c0=m.s.c-rg.s.c,v=rows[r0]?.[c0];
+    for(let r=r0+1;r<=m.e.r-rg.s.r;r++){rows[r]=rows[r]||[];rows[r][c0]=v}
+  }
+  return rows;
+}
+function newRv(label,arrival,grid,format){return{id:'b'+Date.now()+Math.random().toString(36).slice(2,6),label,arrival,grid,fixed:{},format}}
+async function processSheetFile(file){
+  if(typeof XLSX==='undefined')throw new Error('Excel 讀取元件沒有載入，請確認網路後重新整理');
+  const buf=await file.arrayBuffer();
+  const wb=/\.csv$/i.test(file.name)?XLSX.read(new TextDecoder().decode(buf),{type:'string'}):XLSX.read(buf,{type:'array'});
+  const base=file.name.replace(/\.[^.]+$/,''),fileArr=parseArrival(file.name),out=[];
+  const visible=wb.SheetNames.filter((n,i)=>!(wb.Workbook?.Sheets?.[i]?.Hidden));
+  for(const name of visible){
+    const tables=parseRows(sheetRows(wb.Sheets[name]));
+    tables.forEach(t=>{
+      const parts=[base];if(visible.length>1)parts.push(name);if(tables.length>1)parts.push(t.title||t.arrival&&fmtMD(t.arrival)||'第'+(out.length+1)+'段');
+      out.push(newRv(parts.join('／'),t.arrival||fileArr,t.grid,t.format));
+    });
+  }
+  if(!out.length)throw new Error('找不到尺寸表頭（XS、S、M… 或「尺寸／數量」欄），請確認是尺碼明細表');
+  return out;
+}
+function processPastedText(text){
+  const rows=text.replace(/\r/g,'').split('\n').map(l=>l.split('\t'));
+  const tables=parseRows(rows);
+  if(!tables.length)throw new Error('貼上的內容找不到尺寸表頭（XS、S、M… 或「尺寸／數量」欄）');
+  const stamp='貼上表格_'+new Date().toLocaleTimeString('zh-TW',{hour12:false}).replace(/:/g,'');
+  return tables.map((t,i)=>newRv(stamp+(tables.length>1?'／'+(t.title||i+1):''),t.arrival,t.grid,t.format));
+}
+
+/* ---------- image → grid ---------- */
+function loadImage(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file);const i=new Image();i.onload=()=>res({img:i,url:u});i.onerror=()=>rej(new Error('讀不到這張圖片'));i.src=u})}
+
+function analyse(img){
+  const w=img.naturalWidth,h=img.naturalHeight;
+  const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+  const ctx=cv.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0);
+  const d=ctx.getImageData(0,0,w,h).data;
+  const lum=new Float32Array(w*h);
+  for(let i=0,p=0;i<w*h;i++,p+=4){
+    const r=d[p],g=d[p+1],b=d[p+2];
+    // Excel 的綠色小三角形當成白色
+    lum[i]=(g>r+40&&g>b+40)?255:0.299*r+0.587*g+0.114*b;
+  }
+  return{w,h,lum};
+}
+function merge(list){const out=[];for(const x of list){if(out.length&&x-out[out.length-1].at(-1)<=2)out[out.length-1].push(x);else out.push([x])}return out.map(g=>Math.round(g.reduce((a,b)=>a+b,0)/g.length))}
+// 方法一：有完整格線的表格
+function detectGrid({w,h,lum},thr){
+  const dark=i=>lum[i]<thr;
+  const rows=[];
+  for(let y=0;y<h;y++){let n=0;for(let x=0;x<w;x++)if(dark(y*w+x))n++;if(n>0.4*w)rows.push(y)}
+  let H=merge(rows);if(H.length<2)return null;
+  const y0=H[0],y1=H.at(-1),span=y1-y0,cols=[];
+  for(let x=0;x<w;x++){let n=0;for(let y=y0;y<=y1;y++)if(dark(y*w+x))n++;if(n>0.5*span)cols.push(x)}
+  let V=merge(cols);if(V.length<2)return null;
+  const ink=(xa,ya,xb,yb)=>{let n=0;for(let y=Math.max(0,ya);y<Math.min(h,yb);y++)for(let x=Math.max(0,xa);x<Math.min(w,xb);x++)if(lum[y*w+x]<170)n++;return n};
+  if(H[0]>8&&ink(0,0,w,H[0]-2)>100)H=[0,...H];
+  if(h-H.at(-1)>8&&ink(0,H.at(-1)+2,w,h)>100)H=[...H,h-1];
+  if(V[0]>8&&ink(0,0,V[0]-2,h)>100)V=[0,...V];
+  if(w-V.at(-1)>8&&ink(V.at(-1)+2,0,w,h)>100)V=[...V,w-1];
+  if(H.length<3||V.length<3)return null;
+  return{src:{w,lum},rowsY:H.slice(0,-1).map((y,i)=>[y+3,H[i+1]-2]),colsX:V.slice(0,-1).map((x,i)=>[x+3,V[i+1]-2])};
+}
+function runs(arr,ok,mingap,minlen){
+  const out=[];let s=-1;
+  for(let i=0;i<=arr.length;i++){const v=i<arr.length&&ok(arr[i]);if(v&&s<0)s=i;if(!v&&s>=0){out.push([s,i]);s=-1}}
+  const m=[];for(const r of out){if(m.length&&r[0]-m.at(-1)[1]<mingap)m.at(-1)[1]=r[1];else m.push(r)}
+  return m.filter(r=>r[1]-r[0]>=minlen);
+}
+// 方法二：沒有直線的樞紐分析表（只有橫線或底色），用文字的分布切欄列
+function detectByText({w,h,lum}){
+  const bg=new Float32Array(h),tmp=[];
+  for(let y=0;y<h;y++){tmp.length=0;for(let x=0;x<w;x+=2)tmp.push(lum[y*w+x]);tmp.sort((a,b)=>a-b);bg[y]=tmp[tmp.length>>1]}
+  const N=new Float32Array(w*h),ink=new Uint8Array(w*h);
+  for(let y=0;y<h;y++){const inv=bg[y]<128,bgN=inv?255-bg[y]:bg[y];
+    for(let x=0;x<w;x++){const i=y*w+x,p=inv?255-lum[i]:lum[i],diff=bgN-p;
+      N[i]=Math.max(0,Math.min(255,255-diff*255/150));if(diff>70)ink[i]=1}}
+  const colN=new Uint32Array(w);for(let y=0;y<h;y++)for(let x=0;x<w;x++)colN[x]+=ink[y*w+x];
+  const vl=new Uint8Array(w);for(let x=0;x<w;x++)if(colN[x]>0.6*h)for(let k=-1;k<=1;k++)if(x+k>=0&&x+k<w)vl[x+k]=1;
+  const yc=new Uint32Array(h),xc=new Uint32Array(w);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(ink[y*w+x]&&!vl[x]){yc[y]++;xc[x]++}
+  const R=runs(yc,v=>v>=2,3,5);
+  let C=runs(xc,v=>v>=1,10,3);
+  C=C.filter(([x0,x1])=>R.filter(([y0,y1])=>{for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)if(ink[y*w+x])return true;return false}).length>=2);
+  if(R.length<2||C.length<2)return null;
+  const span=(L,i,max,padv)=>[i?Math.max(L[i][0]-padv,(L[i-1][1]+L[i][0])>>1):Math.max(0,L[i][0]-padv),
+    i<L.length-1?Math.min(L[i][1]+padv,(L[i][1]+L[i+1][0])>>1):Math.min(max,L[i][1]+padv)];
+  return{src:{w,lum:N},rowsY:R.map((_,i)=>span(R,i,h,3)),colsX:C.map((_,i)=>span(C,i,w,6))};
+}
+function cellCanvas({w,lum},x0,y0,x1,y1){
+  let minx=1e9,miny=1e9,maxx=-1,maxy=-1,n=0;
+  for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)if(lum[y*w+x]<170){n++;if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y}
+  if(n<4)return null;
+  minx=Math.max(x0,minx-2);miny=Math.max(y0,miny-2);maxx=Math.min(x1-1,maxx+2);maxy=Math.min(y1-1,maxy+2);
+  const cw=maxx-minx+1,ch=maxy-miny+1;
+  const s=document.createElement('canvas');s.width=cw;s.height=ch;
+  const sc=s.getContext('2d'),id=sc.createImageData(cw,ch);
+  for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){const v=lum[(miny+y)*w+minx+x],p=(y*cw+x)*4;id.data[p]=id.data[p+1]=id.data[p+2]=v;id.data[p+3]=255}
+  sc.putImageData(id,0,0);
+  const S=2,big=document.createElement('canvas');big.width=cw*S+60;big.height=ch*S+60;
+  const bc=big.getContext('2d');bc.fillStyle='#fff';bc.fillRect(0,0,big.width,big.height);
+  bc.imageSmoothingEnabled=true;bc.imageSmoothingQuality='high';bc.drawImage(s,30,30,cw*S,ch*S);
+  return big;
+}
+
+/* ---------- OCR engine ---------- */
+let engine=null;
+async function getEngine(){
+  if(engine)return engine;
+  setStatus('載入辨識字庫中（第一次約需下載十幾 MB，之後會記住）…');
+  const mk=async(lang,params)=>{const wk=await Tesseract.createWorker(lang,1);await wk.setParameters(params);return wk};
+  const dp={tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789'};
+  const [d1,d2,hw,cw]=await Promise.all([mk('eng',dp),mk('eng',dp),
+    mk('eng',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'XSMLJF0123456789'}),
+    mk('chi_tra',{tessedit_pageseg_mode:'7'})]);
+  const sched=Tesseract.createScheduler();sched.addWorker(d1);sched.addWorker(d2);
+  const clean=r=>(r.data.text||'').replace(/\s+/g,'');
+  engine={digit:c=>sched.addJob('recognize',c).then(clean),head:c=>hw.recognize(c).then(clean),chi:c=>cw.recognize(c).then(clean)};
+  return engine;
+}
+
+function resolveHeaders(engs,chis){
+  const cols=engs.map((e,i)=>{const ch=chis[i]||'';
+    const k=classify(ch);if(['total','code','color','product'].includes(k.type))return k;
+    const s=normSize(e)||normSize(ch);
+    return s?{type:'size',size:s}:{type:'unknown',raw:ch||e||''}});
+  let prev=-1;
+  cols.forEach(c=>{if(c.type==='size'){const i=sizeIdx(c.size);if(i<=prev){c.type='unknown';c.raw=c.size}else prev=i}});
+  let i=0;
+  while(i<cols.length){
+    if(cols[i].type!=='unknown'){i++;continue}
+    let j=i;while(j<cols.length&&cols[j].type==='unknown')j++;
+    const L=cols[i-1],R=cols[j];
+    if(L&&R&&L.type==='size'&&R.type==='size'){
+      const cand=SIZE_ORDER.slice(sizeIdx(L.size)+1,sizeIdx(R.size));
+      if(cand.length===j-i)for(let k=i;k<j;k++)cols[k]={type:'size',size:cand[k-i]};
+    }
+    i=j;
+  }
+  const NAME={total:'合計',code:'色號',color:'顏色',product:'品號'};
+  return cols.map(c=>c.type==='size'?c.size:NAME[c.type]||c.raw);
+}
+// 表頭沒認出時，用欄位內容判斷
+function assignTextRoles(g,textCols){
+  const types=g[0].map(classify);
+  const has=t=>types.some(x=>x.type===t);
+  const stat=c=>{const v=g.slice(1).map(r=>r[c]).filter(Boolean);
+    return{n:v.length,latin:v.filter(x=>/[A-Za-z0-9]{3,}/.test(x)).length/(v.length||1),cjk:v.filter(x=>/[\u4e00-\u9fff]/.test(x)).length/(v.length||1)}};
+  const free=textCols.filter(c=>types[c].type==='ignore');
+  if(!has('product')){const c=free.find(c=>{const s=stat(c);return s.n&&s.latin>=0.6});
+    if(c!=null){g[0][c]='品號';free.splice(free.indexOf(c),1)}}
+  if(!has('color')){
+    const c=free.filter(c=>stat(c).cjk>=0.5).sort((a,b)=>stat(b).n-stat(a).n)[0];
+    // 舊格式第一格是款號標題，保留給 layout 判斷
+    if(c!=null&&!(c===0&&g[0][0]&&!g[0].some((t,i)=>i>0&&classify(t).type==='product')))g[0][c]='顏色';
+  }
+}
+function autoFixHeaders(g){
+  const L=layout(g),nC=g[0].length;
+  const dataRows=g.slice(1).filter(r=>r[L.colorCol]&&!SUM_RE.test(r[L.colorCol]));
+  if(L.totalCol<0){
+    const last=nC-1;
+    if(L.types[last].type==='ignore'){
+      let hit=0,tried=0;
+      for(const r of dataRows){const t=num(r[last]);if(t==null)continue;tried++;
+        if(L.sizeCols.reduce((a,c)=>a+(num(r[c])||0),0)===t)hit++}
+      if(tried&&hit>=tried/2)g[0][last]='合計';
+    }
+  }
+  if(L.codeCol<0)for(let c=0;c<nC;c++){
+    if(L.types[c].type!=='ignore'||isText(L,c))continue;
+    const vals=dataRows.map(r=>r[c]).filter(Boolean);
+    if(vals.length&&vals.every(v=>/^\d{1,3}$/.test(v))&&vals.some(v=>/^0/.test(v))){g[0][c]='色號';break}
+  }
+}
+
+function knownColors(){const s=new Set();for(const b of saved)for(const r of extract(b).rows)s.add(r.color);return[...s]}
+function suggestColor(name,known){
+  if(!name||known.includes(name))return null;
+  let best=null,bd=1e9;
+  for(const k of known){if(k.length!==name.length)continue;let d=0;for(let i=0;i<k.length;i++)if(k[i]!==name[i])d++;
+    if(d<bd){bd=d;best=k}}
+  return best&&bd<=Math.max(1,Math.floor(name.length/3))?best:null;
+}
+
+async function processFile(file){
+  const {img,url}=await loadImage(file);
+  const A=analyse(img);
+  const G=detectGrid(A,170)||detectGrid(A,235)||detectByText(A);
+  if(!G)throw new Error('認不出表格結構，請上傳清楚的表格截圖');
+  const {src,rowsY,colsX}=G,nR=rowsY.length,nC=colsX.length;
+  const cv=(r,c)=>cellCanvas(src,colsX[c][0],rowsY[r][0],colsX[c][1],rowsY[r][1]);
+  const E=await getEngine();
+  const grid=Array.from({length:nR},()=>Array(nC).fill(''));
+  const fixTxt=t=>t.replace(/（/g,'(').replace(/）/g,')').replace(/[|｜]/g,'');
+  // 1. 表頭
+  const head=[];for(let c=0;c<nC;c++){const x=cv(0,c);if(x)head.push({c,cv:x})}
+  const body=[];for(let r=1;r<nR;r++)for(let c=0;c<nC;c++){const x=cv(r,c);if(x)body.push({r,c,cv:x})}
+  const total=head.length*2+body.length;let done=0;
+  const tick=()=>{done++;setStatus(`辨識「${file.name}」：${done} / ${total} 格`);setBar(done/total)};
+  const engH=Array(nC).fill(''),chiH=Array(nC).fill('');
+  await Promise.all([
+    (async()=>{for(const x of head){chiH[x.c]=fixTxt(await E.chi(x.cv));tick()}})(),
+    (async()=>{for(const x of head){engH[x.c]=await E.head(x.cv);tick()}})()
+  ]);
+  const hs=resolveHeaders(engH,chiH);
+  for(let c=0;c<nC;c++)grid[0][c]=hs[c]||'';
+  // 2. 尺寸欄左邊的是文字欄（品號、顏色），其餘讀數字
+  const firstSize=grid[0].findIndex(t=>classify(t).type==='size');
+  const textCols=[];for(let c=0;c<(firstSize<0?1:firstSize);c++)if(classify(grid[0][c]).type!=='code')textCols.push(c);
+  const tJobs=body.filter(x=>textCols.includes(x.c)),dJobs=body.filter(x=>!textCols.includes(x.c));
+  await Promise.all([
+    (async()=>{for(const x of tJobs){grid[x.r][x.c]=fixTxt(await E.chi(x.cv));tick()}})(),
+    Promise.all(dJobs.map(async x=>{grid[x.r][x.c]=(await E.digit(x.cv)).replace(/\D/g,'');tick()}))
+  ]);
+  const g=grid.filter((row,r)=>r===0||row.some(Boolean));
+  assignTextRoles(g,textCols);
+  autoFixHeaders(g);
+  const L=layout(g);
+  if(L.productCol>=0)for(let r=1;r<g.length;r++){const v=g[r][L.productCol];if(v&&!SUM_RE.test(v))g[r][L.productCol]=cleanCode(v)}
+  const known=knownColors(),fixed={};
+  for(let r=1;r<g.length;r++){const n=g[r][L.colorCol];if(!n||SUM_RE.test(n))continue;const s=suggestColor(n,known);if(s){fixed[r+','+L.colorCol]=n;g[r][L.colorCol]=s}}
+  return{id:'b'+Date.now()+Math.random().toString(36).slice(2,6),label:file.name.replace(/\.[^.]+$/,''),arrival:parseArrival(file.name),imgUrl:url,grid:g,fixed};
+}
+
+/* ---------- validation ---------- */
+function validate(g){
+  const L=layout(g),{types,colorCol,productCol,codeCol,sizeCols,totalCol}=L,nC=g[0].length;
+  const bad=new Set(),warn=new Set(),kinds=[],prodOf=[],members={},psumOf={};
+  const sMin=Math.min(...sizeCols),sMax=Math.max(...sizeCols);
+  const seen={};
+  sizeCols.forEach(c=>{const s=types[c].size;if(seen[s]!=null){warn.add('0,'+c);warn.add('0,'+seen[s])}else seen[s]=c});
+  let cur=L.title,group=null;
+  for(let r=1;r<g.length;r++){
+    const color=(g[r][colorCol]||'').trim(),prod=productCol>=0?(g[r][productCol]||'').trim():'';
+    const hasNum=[...sizeCols,totalCol].some(c=>c>=0&&g[r][c]);
+    const ps=prod.match(SUBTOTAL_RE)||(!prod&&color.match(SUBTOTAL_RE));
+    if(ps&&!SUM_RE.test(ps[1])){kinds[r]='psum';psumOf[r]=ps[1].trim()}
+    else if(SUM_RE.test(color)||SUM_RE.test(prod))kinds[r]='sum';
+    else if(color){kinds[r]='data';if(prod){cur=prod;group=null}prodOf[r]=cur;if(group!=null)members[group].push(r)}
+    else if(prod){kinds[r]='group';cur=prod;group=r;members[r]=[]}
+    else kinds[r]=hasNum?'sum':'empty';
+    for(let c=0;c<nC;c++){if(isText(L,c)||c===codeCol)continue;const v=num(g[r][c]);
+      const inBlock=c>sMin&&c<sMax;
+      if(Number.isNaN(v)&&(types[c].type==='size'||c===totalCol))bad.add(r+','+c);
+      if(v!=null&&types[c].type==='ignore'&&inBlock&&kinds[r]==='data')warn.add('0,'+c)}
+  }
+  const dataRows=[];for(let r=1;r<g.length;r++)if(kinds[r]==='data')dataRows.push(r);
+  const rowSum=r=>sizeCols.reduce((a,c)=>a+(num(g[r][c])||0),0);
+  if(totalCol>=0)for(const r of dataRows){const t=num(g[r][totalCol]);if(t!=null&&!Number.isNaN(t)&&t!==rowSum(r))bad.add(r+','+totalCol)}
+  const checkAgainst=(r,rows)=>{for(const c of [...sizeCols,totalCol]){if(c<0)continue;const v=num(g[r][c]);if(v==null||Number.isNaN(v))continue;
+      const s=rows.reduce((a,rr)=>a+(c===totalCol?rowSum(rr):(num(g[rr][c])||0)),0);if(s!==v)bad.add(r+','+c)}};
+  for(let r=1;r<g.length;r++){if(kinds[r]==='sum')checkAgainst(r,dataRows);if(kinds[r]==='group'&&members[r].length)checkAgainst(r,members[r]);
+    if(kinds[r]==='psum'){const m=dataRows.filter(rr=>rr<r&&prodOf[rr]===psumOf[r]);if(m.length)checkAgainst(r,m)}}
+  return{...L,kinds,prodOf,bad,warn,issues:bad.size+warn.size,hasTotal:totalCol>=0};
+}
+
+/* ---------- review UI ---------- */
+const reviews=[];
+function setStatus(t){$('#status').textContent=t}
+function setBar(f){const b=$('#bar');if(f==null){b.style.display='none';return}b.style.display='block';b.firstElementChild.style.width=Math.round(f*100)+'%'}
+
+function renderReview(rv){
+  const box=document.createElement('article');box.className='panel review';box.id='rv-'+rv.id;
+  box.innerHTML=`<header><div class="left"><h3></h3><label class="arr">到貨日<input data-arr inputmode="numeric" placeholder="例如 10/22"></label></div><span class="pill"></span></header>
+    ${rv.imgUrl?`<details class="src" open><summary>原始圖片（對照用）</summary><img alt="上傳的表格截圖"></details>`:''}
+    <div class="legend"><span><b style="background:var(--bad-bg);outline:1px solid var(--bad)"></b>加總對不上，請對照原圖修正</span>
+    <span><b style="background:var(--fix-bg);outline:1px solid var(--tape)"></b>依之前的顏色自動校正／表頭待確認</span>
+    <span>表頭可改成「品號」「顏色」「色號」「合計」或尺寸（如 XL、2XL）；劃線的欄位不會被計入</span></div>
+    <div class="scroll"><table class="grid"></table></div>
+    <div class="actions"><button class="primary" data-act="save">${rv.editingId?'儲存修改':'加入查詢'}</button><button data-act="drop">${rv.editingId?'取消':'捨棄'}</button></div>`;
+  box.querySelector('h3').textContent=rv.label;
+  if(rv.format){const f=document.createElement('small');f.className='fmt';f.textContent='判讀格式：'+rv.format;box.querySelector('.left').appendChild(f)}
+  if(rv.imgUrl)box.querySelector('img').src=rv.imgUrl;
+  const arr=box.querySelector('[data-arr]');arr.value=fmtMD(rv.arrival);arr.classList.toggle('missing',!rv.arrival);
+  arr.title=rv.arrival?'':'檔名裡沒有找到「XXXX到」，請手動填入';
+  arr.addEventListener('input',()=>{rv.arrival=parseMD(arr.value,rv.created?new Date(rv.created):undefined);arr.classList.toggle('missing',!rv.arrival)});
+  arr.addEventListener('change',()=>{if(rv.arrival)arr.value=fmtMD(rv.arrival)});
+  const table=box.querySelector('table'),L0=layout(rv.grid);
+  rv.grid.forEach((row,r)=>{const tr=table.insertRow();row.forEach((txt,c)=>{
+    const td=document.createElement(r===0?'th':'td');td.contentEditable='true';td.spellcheck=false;td.textContent=txt;td.dataset.r=r;td.dataset.c=c;
+    if(r>0&&!isText(L0,c))td.inputMode='numeric';
+    const f=rv.fixed&&rv.fixed[r+','+c];if(f)td.title='原辨識：'+f;
+    tr.appendChild(td)})});
+  table.addEventListener('input',e=>{const td=e.target.closest('td,th');if(!td)return;rv.grid[+td.dataset.r][+td.dataset.c]=td.textContent.trim();
+    if(rv.fixed)delete rv.fixed[td.dataset.r+','+td.dataset.c];paint(rv,box)});
+  table.addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();const td=e.target.closest('td,th');
+    const nx=table.rows[+td.dataset.r+1]?.cells[+td.dataset.c];if(nx){nx.focus();const s=getSelection();s.selectAllChildren(nx)}});
+  table.addEventListener('paste',e=>{e.preventDefault();document.execCommand('insertText',false,(e.clipboardData.getData('text')||'').replace(/\s+/g,' ').trim())});
+  box.querySelector('[data-act=save]').onclick=e=>commit(rv,e.currentTarget);
+  box.querySelector('[data-act=drop]').onclick=()=>{removeReview(rv)};
+  $('#reviews').appendChild(box);paint(rv,box);
+  box.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+}
+function paint(rv,box){
+  const v=validate(rv.grid),table=box.querySelector('table');
+  [...table.rows].forEach((tr,r)=>{tr.className=r>0&&['sum','group','psum'].includes(v.kinds[r])?'sumrow':'';
+    [...tr.cells].forEach((td,c)=>{const k=r+','+c;
+      td.classList.toggle('bad',v.bad.has(k));td.classList.toggle('warn',v.warn.has(k));
+      td.classList.toggle('fixed',!!(rv.fixed&&rv.fixed[k]));
+      td.classList.toggle('c-total',c===v.totalCol);td.classList.toggle('name',isText(v,c));
+      if(r===0){td.classList.toggle('t-ignore',v.types[c].type==='ignore');td.classList.toggle('t-total',v.types[c].type==='total')}})});
+  const pill=box.querySelector('.pill');
+  if(!v.sizeCols.length){pill.className='pill bad';pill.textContent='沒有認出任何尺寸欄，請修改表頭'}
+  else if(v.issues){pill.className='pill bad';pill.textContent=`${v.issues} 處待確認`}
+  else{pill.className='pill ok';pill.textContent=v.hasTotal?'加總核對無誤':'無合計欄，無法核對加總'}
+}
+function removeReview(rv){const i=reviews.indexOf(rv);if(i>=0)reviews.splice(i,1);$('#rv-'+rv.id)?.remove();if(rv.imgUrl)URL.revokeObjectURL(rv.imgUrl)}
+async function commit(rv,btn){
+  const v=validate(rv.grid);
+  if(!v.sizeCols.length){alert('表頭沒有任何尺寸，無法加入。請把尺寸欄的表頭改成 S、M、L…');return}
+  if(!rv.arrival&&!confirm('還沒填到貨日（例如 10/22），仍要繼續嗎？'))return;
+  if(v.issues&&!confirm(`還有 ${v.issues} 處沒核對過，仍要${rv.editingId?'儲存':'加入'}嗎？`))return;
+  const rec={id:rv.editingId||rv.id,label:rv.label,arrival:rv.arrival||'',style:layout(rv.grid).title,format:rv.format||'',created:rv.created||new Date().toISOString(),grid:rv.grid};
+  const existed=saved.some(b=>b.id===rec.id);
+  const ok=await busy(btn,async()=>{setStatus(`儲存「${rec.label}」到 Google Sheet 中…`);await saveTable(rec);return true});
+  if(!ok){setStatus('儲存失敗，資料還在畫面上，可以再按一次');return}
+  removeReview(rv);setStatus(`已${existed?'更新':'加入'}「${rec.label}」，客服重新整理後就看得到`);renderAll();
+}
+
+async function handleFiles(files){
+  const isSheet=f=>/\.(xlsx|xls|csv)$/i.test(f.name);
+  files=[...files].filter(f=>isSheet(f)||f.type.startsWith('image/'));if(!files.length)return;
+  for(const f of files){
+    try{
+      if(isSheet(f)){const list=await processSheetFile(f);list.forEach(rv=>{reviews.push(rv);renderReview(rv)});
+        setStatus(`「${f.name}」讀取完成，確認到貨日後按「加入查詢」`);continue}
+      setBar(0);const rv=await processFile(f);reviews.push(rv);renderReview(rv);
+      setStatus(`「${f.name}」辨識完成，請核對紅色格子後按「加入查詢」`)}
+    catch(e){console.error(e);setStatus(`「${f.name}」：${e.message||'辨識失敗'}`)}
+  }
+  setBar(null);
+}
+
+/* ---------- query ---------- */
+const qs={text:'',product:'all',arrival:'all',sizes:new Set(),hideEmpty:true};
+function extract(b){
+  const v=validate(b.grid),rows=[];
+  for(let r=1;r<b.grid.length;r++){if(v.kinds[r]!=='data')continue;
+    const q={};for(const c of v.sizeCols){const n=num(b.grid[r][c]);if(n)q[v.types[c].size]=(q[v.types[c].size]||0)+n}
+    const sp=splitProduct(aliasProduct(v.prodOf[r]));
+    rows.push({product:sp.code,tag:sp.tag,rawProduct:v.prodOf[r]||'',color:b.grid[r][v.colorCol],code:v.codeCol>=0?b.grid[r][v.codeCol]:'',q})}
+  const sizes=[...new Set(v.sizeCols.map(c=>v.types[c].size))];
+  return{sizes,rows};
+}
+function scopeBatches(){
+  const list=qs.arrival==='all'?saved:saved.filter(b=>(b.arrival||'none')===qs.arrival);
+  return[...list].sort((a,b)=>(a.arrival||'9999').localeCompare(b.arrival||'9999'));
+}
+function renderScope(){
+  const sel=$('#arrival');
+  const dates=[...new Set(saved.map(b=>b.arrival||'none'))].sort((a,b)=>(a==='none'?'9999':a).localeCompare(b==='none'?'9999':b));
+  if(qs.arrival!=='all'&&!dates.includes(qs.arrival))qs.arrival='all';
+  sel.innerHTML='<option value="all">全部日期</option>'+dates.map(d=>{const n=saved.filter(b=>(b.arrival||'none')===d).length;
+    return`<option value="${d}">${d==='none'?'未填到貨日':fmtMD(d)+' 到'}（${n} 張）</option>`}).join('');
+  sel.value=qs.arrival;
+  const colors=new Set(),prods=new Set();saved.forEach(b=>extract(b).rows.forEach(r=>{colors.add(r.color);if(r.product)prods.add(r.product)}));
+  const ps=[...prods].sort();if(qs.product!=='all'&&!ps.includes(qs.product))qs.product='all';
+  $('#product').innerHTML='<option value="all">全部品號</option>'+ps.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  $('#product').value=qs.product;
+  $('#colorList').innerHTML=[...colors].map(c=>`<option value="${esc(c)}">`).join('');
+}
+function renderTags(sizes){
+  const box=$('#tags');
+  for(const s of [...qs.sizes])if(!sizes.includes(s))qs.sizes.delete(s);
+  box.innerHTML=sizes.map(s=>`<button class="tag" data-s="${s}" aria-pressed="${qs.sizes.has(s)}">${s}</button>`).join('')+
+    (qs.sizes.size?'<button class="tag clear" data-s="">清除尺寸</button>':'');
+}
+let lastRows=[],lastCols=[];
+function renderResult(){
+  const bs=scopeBatches(),res=$('#result');
+  if(!saved.length){$('#tags').innerHTML='';res.innerHTML='<p class="empty">目前沒有到貨資料。</p>';return}
+  const ex=bs.map(b=>({b,...extract(b)}));
+  const all=[...new Set(ex.flatMap(e=>e.sizes))].sort((a,b)=>sizeIdx(a)-sizeIdx(b));
+  renderTags(all);
+  const cols=qs.sizes.size?all.filter(s=>qs.sizes.has(s)):all;
+  const t=nz(qs.text.trim());
+  const rows=[],byKey=new Map();
+  for(const e of ex)for(const r of e.rows){
+    if(qs.product!=='all'&&r.product!==qs.product)continue;
+    if(t&&!(nz(r.color).includes(t)||nz(r.product).includes(t)||(r.code&&r.code.includes(t))))continue;
+    const vals=cols.map(s=>r.q[s]||0);
+    // 同一批、同品號、同顏色合併（例如品名對照到同一個品號）
+    const key=[e.b.arrival,e.b.id,r.product,r.tag,r.color,r.code].join('|');
+    const hit=byKey.get(key);
+    if(hit){hit.vals=hit.vals.map((v,i)=>v+vals[i]);hit.tot=hit.vals.reduce((a,b)=>a+b,0);continue}
+    const row={arrival:e.b.arrival||'',label:e.b.label,product:r.product,tag:r.tag||'',color:r.color,code:r.code,vals,tot:vals.reduce((a,b)=>a+b,0)};
+    byKey.set(key,row);rows.push(row);
+  }
+  if(qs.hideEmpty)for(let i=rows.length-1;i>=0;i--)if(!rows[i].tot)rows.splice(i,1);
+  lastRows=rows;lastCols=cols;
+  if(!rows.length){res.innerHTML=`<p class="empty">沒有符合的資料${qs.sizes.size?'（或這些尺寸都是 0）':''}。換個品號、顏色、到貨時間，或清除尺寸篩選。</p>`;return}
+  const colTot=cols.map((_,i)=>rows.reduce((a,r)=>a+r.vals[i],0)),grand=colTot.reduce((a,b)=>a+b,0);
+  const hasCode=rows.some(r=>r.code),multi=rows.some(r=>r.product);
+  res.innerHTML=`<p class="summary">找到 ${rows.length} 筆，共 <em>${grand.toLocaleString()}</em> 件</p>
+  <div class="scroll"><table class="res"><thead><tr><th class="l">到貨</th>${multi?'<th class="l">品號</th>':''}<th class="l">顏色</th>${hasCode?'<th class="l">色號</th>':''}
+  ${cols.map(s=>`<th>${s}</th>`).join('')}<th>小計</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr><td class="l">${r.arrival?fmtMD(r.arrival):'未填'}</td>${multi?`<td class="l">${esc(r.product)}${r.tag?` <small class="tagnote">${esc(r.tag)}</small>`:''}</td>`:''}<td class="l">${esc(r.color)}</td>${hasCode?`<td class="l">${esc(r.code)}</td>`:''}
+   ${r.vals.map(v=>`<td class="${v?(qs.sizes.size?'hit':''):'zero'}">${v?v.toLocaleString():'–'}</td>`).join('')}<td class="tot">${r.tot.toLocaleString()}</td></tr>`).join('')}
+  </tbody><tfoot><tr><td class="l" colspan="${2+(multi?1:0)+(hasCode?1:0)}">合計</td>${colTot.map(v=>`<td>${v.toLocaleString()}</td>`).join('')}<td>${grand.toLocaleString()}</td></tr></tfoot></table></div>`;
+}
+function renderSaved(){
+  const ul=$('#saved');
+  if(!saved.length){ul.innerHTML='<li><small>目前沒有表格。</small></li>';return}
+  ul.innerHTML='';
+  saved.forEach(b=>{const e=extract(b),pcs=e.rows.reduce((a,r)=>a+Object.values(r.q).reduce((x,y)=>x+y,0),0);
+    const li=document.createElement('li');
+    li.innerHTML=`<input aria-label="表格名稱"><label class="arr">到貨<input data-arr inputmode="numeric" placeholder="10/22"></label><small>${esc([...new Set(e.rows.map(r=>r.product).filter(Boolean))].join('、'))}　${e.rows.length} 筆　${pcs.toLocaleString()} 件　${new Date(b.created).toLocaleDateString('zh-TW')}</small>
+      <button data-act="edit">修改數字</button><button class="danger" data-act="del">刪除</button>`;
+    const inp=li.querySelector('input');inp.value=b.label;
+    inp.onchange=()=>busy(inp,async()=>{b.label=inp.value.trim()||b.label;await saveTable(b);renderScope();renderResult()});
+    const ai=li.querySelector('[data-arr]');ai.value=fmtMD(b.arrival);ai.classList.toggle('missing',!b.arrival);
+    ai.onchange=()=>{const v=parseMD(ai.value,new Date(b.created));if(ai.value.trim()&&!v){alert('看不懂這個日期，請輸入像 10/22 或 1022');ai.value=fmtMD(b.arrival);return}
+      busy(ai,async()=>{b.arrival=v;await saveTable(b);renderAll()})};
+    li.querySelector('[data-act=edit]').onclick=()=>{
+      if(reviews.some(r=>r.editingId===b.id))return document.getElementById('rv-'+reviews.find(r=>r.editingId===b.id).id).scrollIntoView();
+      const rv={id:'e'+Date.now(),editingId:b.id,label:b.label,created:b.created,arrival:b.arrival||'',grid:b.grid.map(r=>[...r]),fixed:{}};reviews.push(rv);renderReview(rv)};
+    li.querySelector('[data-act=del]').onclick=e=>{if(!confirm(`確定刪除「${b.label}」？客服那邊也會查不到。`))return;
+      busy(e.currentTarget,async()=>{await apiPost({action:'delete',id:b.id});saved=saved.filter(x=>x!==b);renderAll()})};
+    ul.appendChild(li)});
+}
+function renderAliases(){
+  const ul=$('#aliases');ul.innerHTML='';
+  aliases.forEach((a,i)=>{const li=document.createElement('li');
+    li.innerHTML=`<input aria-label="品名包含" placeholder="品名包含，例如 240克重磅"><span>→</span><input aria-label="品號" placeholder="品號，例如 AG24000"><button class="danger">刪除</button>`;
+    const [m,t]=li.querySelectorAll('input');m.value=a.match;t.value=a.to;
+    m.onchange=()=>{a.match=m.value.trim();saveAliases();renderScope();renderResult()};
+    t.onchange=()=>{a.to=t.value.trim();saveAliases();renderScope();renderResult()};
+    li.querySelector('button').onclick=()=>{aliases.splice(i,1);saveAliases();renderAll()};
+    ul.appendChild(li)});
+  if(!aliases.length)ul.innerHTML='<li><small>目前沒有對照。</small></li>';
+}
+function renderAll(){renderScope();renderResult();renderSaved();renderAliases()}
+
+function exportCSV(){
+  if(!lastRows.length){alert('目前沒有查詢結果可以匯出');return}
+  const head=['到貨日','表格','品號','類別','顏色','色號',...lastCols,'小計'];
+  const lines=[head,...lastRows.map(r=>[fmtMD(r.arrival),r.label,r.product,r.tag,r.color,r.code,...r.vals.map(v=>v||''),r.tot])]
+    .map(a=>a.map(x=>{x=String(x??'');return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x}).join(','));
+  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='顏色尺碼查詢.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+/* ---------- events ---------- */
+$('#file').addEventListener('change',e=>{handleFiles(e.target.files);e.target.value=''});
+const drop=$('#drop');
+['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',e=>handleFiles(e.dataTransfer.files));
+document.addEventListener('paste',e=>{
+  if(!sess.buyer)return;
+  if(e.target.closest&&e.target.closest('[contenteditable],input'))return;
+  const fs=[...(e.clipboardData?.items||[])].filter(i=>i.type.startsWith('image/')).map((i,k)=>{const f=i.getAsFile();
+    return new File([f],`貼上截圖_${new Date().toLocaleTimeString('zh-TW',{hour12:false}).replace(/:/g,'')}${k?'_'+k:''}.png`,{type:f.type})});
+  const txt=e.clipboardData?.getData('text/plain')||'';
+  if(txt.includes('\t')&&txt.includes('\n')){
+    try{processPastedText(txt).forEach(rv=>{reviews.push(rv);renderReview(rv)});setStatus('已讀取貼上的表格，確認到貨日後按「加入查詢」')}
+    catch(err){setStatus(err.message)}
+    return;
+  }
+  if(fs.length)handleFiles(fs);
+});
+$('#q').addEventListener('input',e=>{qs.text=e.target.value;renderResult()});
+$('#product').addEventListener('change',e=>{qs.product=e.target.value;renderResult()});
+$('#arrival').addEventListener('change',e=>{qs.arrival=e.target.value;renderResult()});
+$('#hideEmpty').addEventListener('change',e=>{qs.hideEmpty=e.target.checked;renderResult()});
+$('#tags').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const s=b.dataset.s;
+  if(!s)qs.sizes.clear();else qs.sizes.has(s)?qs.sizes.delete(s):qs.sizes.add(s);renderResult()});
+$('#csv').addEventListener('click',exportCSV);
+$('#addAlias').addEventListener('click',()=>{aliases.push({match:'',to:''});renderAliases();$('#aliases li:last-child input').focus()});
+$('#modeBtn').addEventListener('click',toggleMode);
+$('#refresh').addEventListener('click',loadData);
+setMode();renderAll();loadData();
+</script>
+</body>
+</html>
