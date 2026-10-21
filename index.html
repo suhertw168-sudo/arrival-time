@@ -136,7 +136,7 @@ button[disabled]{opacity:.5;cursor:wait}
     <div class="topbar"><span id="sync" class="sync" role="status" aria-live="polite"></span>
       <button id="refresh">重新整理</button><button id="modeBtn" class="primary">切換到採購模式</button></div>
   </header>
-  <div id="setup" class="panel setup" hidden>還沒設定資料庫網址。請在 index.html 最前面的 <code>API_URL</code> 填入 Apps Script 部署網址。</div>
+  <div id="setup" class="panel setup" hidden>還沒設定資料庫網址。請在 index.html 裡搜尋 <code>API_URL</code> 填入 Apps Script 部署網址。</div>
 
   <section class="buyer-only">
     <h2>上傳到貨明細</h2>
@@ -191,7 +191,7 @@ const $=s=>document.querySelector(s);
 
 /* ---------- storage ---------- */
 /* ======== 設定：貼上 Apps Script「網頁應用程式」部署網址 ======== */
-const API_URL='';
+const API_URL='https://script.google.com/macros/s/AKfycbyU2oq2e3Cspt1mk7IjL6VlH4rzEZLW0Oz2nRx-m1Ol26smDOrGp-s7afjK3u2K8lz4PA/exec';
 /* ================================================================ */
 let saved=[];
 const pad=n=>String(n).padStart(2,'0');
