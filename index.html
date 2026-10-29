@@ -183,7 +183,9 @@ button[disabled]{opacity:.5;cursor:wait}
 
 <script>
 /* ---------- constants ---------- */
-const SIZE_ORDER=['XXS','XS','S','M','L','XL','2XL','3XL','4XL','5XL','6XL','7XL','8XL','F','JXS','JS','JM','JL','JXL','J2XL','J3XL'];
+// 尺寸排列順序：童裝 J 系列 → #號碼 → 成人
+const SIZE_ORDER=['JXS','JS','JM','JL','JXL','J2XL','J3XL','#2','#4','#6','#8','#10','#12','#14','#16','XXS','XS','S','M','L','XL','2XL','3XL','4XL','5XL','6XL','7XL','8XL','F'];
+const sizeFamily=z=>z[0]==='J'?'J':z[0]==='#'?'#':'A';
 const SUM_RE=/數量|数量|合計|合计|總計|总计|小計|小计|總數|总数|總和|总和|汇总|匯總|TOTAL|^SUM$/i;
 const CODE_RE=/色號|色号|色碼|色码|編號|代號|颜色编码|顏色編碼/;
 const STORE='sizeTableLookup.v1';
@@ -265,7 +267,8 @@ const PRODUCT_RE=/品號|品号|品名|款號|款号|款式|款名|貨號|货号
 const COLOR_RE=/顏色|颜色|顏|颜|色名|色系|COLOU?R/i;
 function normSize(t){
   if(!t)return null;
-  let s=String(t).toUpperCase().trim().replace(/\(.*?\)|（.*?）/g,'').split(/[\/／]/)[0].replace(/[碼码號号]$/,'');
+  let s=String(t).toUpperCase().trim().replace(/＃/g,'#').replace(/\(.*?\)|（.*?）/g,'').split(/[\/／]/)[0].replace(/[碼码號号]$/,'');
+  s=s.replace(/^(\d{1,2})\s*#$/,'#$1').replace(/^#\s+/,'#');
   s=s.replace(/[\s.,·:;'"`()（）|_\-]/g,'');
   if(/^(均|均碼|均码|FREE|FREESIZE|ONESIZE|OS|單一尺寸|单一尺寸)$/.test(s))return'F';
   s=s.replace(/^JXXXL$/,'J3XL').replace(/^JXXL$/,'J2XL');
@@ -630,14 +633,15 @@ function resolveHeaders(engs,chis){
     const k=classify(ch);if(['total','code','color','product'].includes(k.type))return k;
     const s=normSize(e)||normSize(ch);
     return s?{type:'size',size:s}:{type:'unknown',raw:ch||e||''}});
-  let prev=-1;
-  cols.forEach(c=>{if(c.type==='size'){const i=sizeIdx(c.size);if(i<=prev){c.type='unknown';c.raw=c.size}else prev=i}});
+  // 同一系列（童裝 J／#號碼／成人）內尺寸要由小到大，不符合的視為讀錯
+  const prev={};
+  cols.forEach(c=>{if(c.type==='size'){const f=sizeFamily(c.size),i=sizeIdx(c.size);if(prev[f]!=null&&i<=prev[f]){c.type='unknown';c.raw=c.size}else prev[f]=i}});
   let i=0;
   while(i<cols.length){
     if(cols[i].type!=='unknown'){i++;continue}
     let j=i;while(j<cols.length&&cols[j].type==='unknown')j++;
     const L=cols[i-1],R=cols[j];
-    if(L&&R&&L.type==='size'&&R.type==='size'){
+    if(L&&R&&L.type==='size'&&R.type==='size'&&sizeFamily(L.size)===sizeFamily(R.size)){
       const cand=SIZE_ORDER.slice(sizeIdx(L.size)+1,sizeIdx(R.size));
       if(cand.length===j-i)for(let k=i;k<j;k++)cols[k]={type:'size',size:cand[k-i]};
     }
