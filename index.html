@@ -210,7 +210,8 @@ const store={get(k,t){try{return(t||localStorage).getItem(k)||''}catch(e){return
 const sess={buyer:store.get('mode',sessionStorage)==='buyer'};
 async function apiGet(){
   const u=new URL(API_URL);u.searchParams.set('t',Date.now());
-  const r=await fetch(u);return r.json();
+  const r=await fetch(u);
+  try{return await r.json()}catch(e){throw new Error('收到的不是資料（HTTP '+r.status+'），通常是部署權限或授權問題')}
 }
 const NET_MSG='連不到 Google Sheet（Failed to fetch）。常見原因：Apps Script 部署的「誰可以存取」不是「所有人」，或修改程式後沒有重新部署新版本。';
 async function apiPost(body){
@@ -229,12 +230,13 @@ async function loadData(){
   setSync('讀取中…');
   try{
     const d=await apiGet();
-    if(!d.ok)throw new Error(d.error);
+    if(!d.ok)throw new Error('Google Sheet 回報錯誤：'+d.error);
     // 到貨日若是在試算表手動輸入（例如 10/25、2026/10/25），統一換成標準格式
     saved=d.tables.map(t=>({...t,arrival:/^\d{4}-\d{2}-\d{2}$/.test(t.arrival||'')?t.arrival:parseAnyDate(t.arrival)}));aliases=d.aliases;
     setSync('資料更新於 '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));
     renderAll();
-  }catch(e){console.error(e);setSync('讀取失敗：連不到 Google Sheet，請確認部署的存取權是「所有人」',true)}
+  }catch(e){console.error(e);
+    setSync(e instanceof TypeError?'讀取失敗：連不到 Google Sheet（Failed to fetch），請確認部署的存取權是「所有人」':'讀取失敗：'+(e.message||e),true)}
 }
 // 給 Google Sheet「明細」工作表的一列一筆資料
 function flatRows(b){const out=[];
