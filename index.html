@@ -201,7 +201,7 @@ function toISO(mo,d,ref){if(!(mo>=1&&mo<=12&&d>=1&&d<=31))return'';ref=ref||new 
   if(mo-rm>6)y--;else if(rm-mo>6)y++;return`${y}-${pad(mo)}-${pad(d)}`}
 // 檔名中的「1022到」、「10/22到」、「10月22日到」
 function parseArrival(name,ref){const s=String(name||'');
-  const m=s.match(/(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})\s*日?\s*到/)||s.match(/(?:^|\D)(\d{1,2})(\d{2})\s*到/);
+  const m=s.match(/(\d{1,2})\s*[\/\-._月]\s*(\d{1,2})\s*日?\s*到/)||s.match(/(?:^|\D)(\d{1,2})(\d{2})\s*到/);
   return m?toISO(+m[1],+m[2],ref):''}
 // 手動輸入：10/22、1022、10-22、10月22日
 function parseMD(v,ref){v=String(v||'').trim().replace(/到$/,'');
@@ -272,7 +272,7 @@ function normSize(t){
   s=s.replace(/[\s.,·:;'"`()（）|_\-]/g,'');
   if(/^(均|均碼|均码|FREE|FREESIZE|ONESIZE|OS|單一尺寸|单一尺寸)$/.test(s))return'F';
   s=s.replace(/^JXXXL$/,'J3XL').replace(/^JXXL$/,'J2XL');
-  s=s.replace(/^Z/,'2').replace(/^XXXXXL$/,'5XL').replace(/^XXXXL$/,'4XL').replace(/^XXXL$/,'3XL').replace(/^XXL$/,'2XL').replace(/^([2-8])X$/,'$1XL');
+  s=s.replace(/^Z/,'2').replace(/^XXXXXL$/,'5XL').replace(/^XXXXL$/,'4XL').replace(/^XXXL$/,'3XL').replace(/^XXL$/,'2XL').replace(/^([2-8])X$/,'$1XL').replace(/^([2-8])L$/,'$1XL');
   s=s.replace(/^S(XL)$/,'5$1').replace(/^[1I](S|M|L|XL)$/,'J$1').replace(/^[1IJ]8$/,'JS').replace(/^5$/,'S');
   return SIZE_ORDER.includes(s)?s:null;
 }
@@ -388,7 +388,7 @@ function readTitleLines(lines,ref){
     const m=l.match(/(?:款號|款号|品號|品号|貨號|货号|型號|型号|款式|品名)\s*[:：]?\s*([^\s,，;；]+)/);if(m&&!product)product=m[1];
     const a=l.match(/(?:到貨|到货|交期|ETA)[^0-9]*([0-9][0-9\/\-.年月日]*)/i);if(a&&!arrival)arrival=parseAnyDate(a[1],ref);
     if(!arrival){const b=parseArrival(l,ref);if(b)arrival=b}
-    if(!product&&/^[A-Za-z]{1,5}[-_]?[A-Za-z]?\d{2,}[A-Za-z0-9\-_()]*$/.test(l.trim()))product=l.trim();
+    if(!product&&/^[A-Za-z]{1,5}[-_]?[A-Za-z]?\d{2,}/.test(l.trim()))product=l.trim();
   }
   return{product,arrival};
 }
@@ -423,6 +423,22 @@ function splitCompactGroups(g){
   }
   return true;
 }
+// 「01 白色」→ 色號 01、顏色 白色（沒有色號欄、且多數顏色都這樣寫時才拆）
+function splitColorCode(g){
+  const L=layout(g);if(L.codeCol>=0)return;
+  // OCR 常把開頭的 0 讀成「(」或「O」，一併處理
+  const cc=L.colorCol,re=/^([(（\[{|Oo]?)\s*(\d{1,3})\s*([^\d\s(（].*)$/;
+  const vals=[];for(let r=1;r<g.length;r++){const v=g[r][cc];if(v&&!SUM_RE.test(v))vals.push(v)}
+  if(!vals.length||vals.filter(v=>re.test(v)).length<vals.length/2)return;
+  const head0=g[0][cc];
+  g.forEach((row,r)=>{if(r===0){row.splice(cc+1,0,'色號');return}
+    const m=(row[cc]||'').match(re);
+    if(m&&!SUM_RE.test(row[cc])){row[cc]=m[3].trim();row.splice(cc+1,0,(m[1]?'0':'')+m[2])}else row.splice(cc+1,0,'')});
+  g[0][cc]=head0;
+  // 色號位數補齊（多數是兩位數時，5 → 05）
+  const w=g.slice(1).map(r=>r[cc+1]).filter(Boolean),len=w.length?Math.max(...w.map(x=>x.length)):0;
+  if(len>1&&w.filter(x=>x.length===len).length>=w.length/2)g.forEach((r,i)=>{if(i&&r[cc+1])r[cc+1]=r[cc+1].padStart(len,'0')});
+}
 // 從表頭那一列開始整理成網格
 function buildGrid(rows,title){
   let g=padRows(rows).filter((r,i)=>i===0||r.some(Boolean));
@@ -436,6 +452,7 @@ function buildGrid(rows,title){
   const textCols=[...Array(firstSize<0?1:firstSize).keys()].filter(c=>classify(g[0][c]).type!=='code');
   assignTextRoles(g,textCols);
   let compact=splitCompactGroups(g);
+  splitColorCode(g);
   autoFixHeaders(g);
   const L=layout(g);
   if(L.productCol<0&&title&&!L.title&&L.colorCol===0)g[0][0]=title;   // 用款號標題當品號
@@ -456,7 +473,11 @@ function headerSegments(rows){
       // 合計欄前面若有一欄空白表頭（例如「(空白)」），把合計欄接上
       if(!r[b+1]&&r[b+2]&&SUM_RE.test(r[b+2])&&!r[b+3])b+=2;
       // 表頭左上角空白、但下面有顏色名稱時，往左包含進來
-      while(a>0&&!r[a-1]&&rows.slice(i+1,i+4).some(x=>x[a-1]&&!/^\d+$/.test(x[a-1]))&&!(r[a-2]))a--;
+      while(a>0){
+        if(!r[a-1]&&rows.slice(i+1,i+6).some(x=>x[a-1]&&!/^\d+$/.test(x[a-1]))){a--;continue}
+        if(r[a-1]&&['product','color','code'].includes(classify(r[a-1]).type)){a--;continue}
+        break;
+      }
       segs.push({row:i,a,b});
     }
   });
@@ -552,7 +573,8 @@ function analyse(img){
   }
   return{w,h,lum};
 }
-function merge(list){const out=[];for(const x of list){if(out.length&&x-out[out.length-1].at(-1)<=2)out[out.length-1].push(x);else out.push([x])}return out.map(g=>Math.round(g.reduce((a,b)=>a+b,0)/g.length))}
+// 連續的深色列合成一條線；太粗的（例如深色底的表頭）取上下兩個邊當格線
+function merge(list){const out=[];for(const x of list){if(out.length&&x-out[out.length-1].at(-1)<=2)out[out.length-1].push(x);else out.push([x])}return out.flatMap(g=>g.length<=5?[Math.round(g.reduce((a,b)=>a+b,0)/g.length)]:[g[0],g.at(-1)])}
 // 方法一：有完整格線的表格
 function detectGrid({w,h,lum},thr){
   const dark=i=>lum[i]<thr;
@@ -568,7 +590,11 @@ function detectGrid({w,h,lum},thr){
   if(V[0]>8&&ink(0,0,V[0]-2,h)>100)V=[0,...V];
   if(w-V.at(-1)>8&&ink(V.at(-1)+2,0,w,h)>100)V=[...V,w-1];
   if(H.length<3||V.length<3)return null;
-  return{src:{w,lum},rowsY:H.slice(0,-1).map((y,i)=>[y+3,H[i+1]-2]),colsX:V.slice(0,-1).map((x,i)=>[x+3,V[i+1]-2])};
+  // 合併儲存格的列（例如「TH04圓領衫」標題）：列裡面幾乎沒有直線
+  const merged=H.slice(0,-1).map((y,i)=>{const y0=y+3,y1=H[i+1]-2;if(y1-y0<4||V.length<4)return false;
+    let present=0;for(let k=1;k<V.length-1;k++){let n=0;for(let yy=y0;yy<y1;yy++){const x=V[k];if(Math.min(lum[yy*w+x],lum[yy*w+x-1]||255,lum[yy*w+x+1]||255)<thr)n++}if(n>0.6*(y1-y0))present++}
+    return present<0.3*(V.length-2)});
+  return{src:{w,lum},merged,rowsY:H.slice(0,-1).map((y,i)=>[y+3,H[i+1]-2]),colsX:V.slice(0,-1).map((x,i)=>[x+3,V[i+1]-2])};
 }
 function runs(arr,ok,mingap,minlen){
   const out=[];let s=-1;
@@ -596,15 +622,31 @@ function detectByText({w,h,lum}){
     i<L.length-1?Math.min(L[i][1]+padv,(L[i][1]+L[i+1][0])>>1):Math.min(max,L[i][1]+padv)];
   return{src:{w,lum:N},rowsY:R.map((_,i)=>span(R,i,h,3)),colsX:C.map((_,i)=>span(C,i,w,6))};
 }
-function cellCanvas({w,lum},x0,y0,x1,y1){
+// 取出一格：以格子本身的底色為準拉高對比（彩色底、深色底的表頭或小計列也讀得清楚），再裁到文字範圍
+function cellPrep({w,lum},x0,y0,x1,y1){
+  const W=x1-x0,Hh=y1-y0;if(W<3||Hh<3)return null;
+  const hist=new Uint32Array(256),a=new Float32Array(W*Hh);
+  for(let y=0;y<Hh;y++)for(let x=0;x<W;x++){const v=lum[(y0+y)*w+x0+x];a[y*W+x]=v;hist[Math.max(0,Math.min(255,v|0))]++}
+  const pct=q=>{let acc=0,t=q*W*Hh;for(let i=0;i<256;i++){acc+=hist[i];if(acc>=t)return i}return 255};
+  let bg=pct(.5);const inv=bg<128;
+  if(inv){for(let i=0;i<a.length;i++)a[i]=255-a[i];bg=255-bg}
+  const dark=inv?255-pct(.998):pct(.002),span=Math.max(bg-dark,40);
+  if(bg-dark<35)return null; // 整格同一個顏色：空白
   let minx=1e9,miny=1e9,maxx=-1,maxy=-1,n=0;
-  for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)if(lum[y*w+x]<170){n++;if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y}
+  for(let i=0;i<a.length;i++){a[i]=Math.max(0,Math.min(255,255-(bg-a[i])*255/span));
+    if(a[i]<170){n++;const x=i%W,y=(i/W)|0;if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y}}
   if(n<4)return null;
-  minx=Math.max(x0,minx-2);miny=Math.max(y0,miny-2);maxx=Math.min(x1-1,maxx+2);maxy=Math.min(y1-1,maxy+2);
-  const cw=maxx-minx+1,ch=maxy-miny+1;
+  minx=Math.max(0,minx-2);miny=Math.max(0,miny-2);maxx=Math.min(W-1,maxx+2);maxy=Math.min(Hh-1,maxy+2);
+  const cw=maxx-minx+1,ch=maxy-miny+1,out=new Float32Array(cw*ch);
+  for(let y=0;y<ch;y++)for(let x=0;x<cw;x++)out[y*cw+x]=a[(miny+y)*W+minx+x];
+  return{cw,ch,data:out};
+}
+function cellCanvas(src,x0,y0,x1,y1){
+  const P=cellPrep(src,x0,y0,x1,y1);if(!P)return null;
+  const {cw,ch,data}=P;
   const s=document.createElement('canvas');s.width=cw;s.height=ch;
   const sc=s.getContext('2d'),id=sc.createImageData(cw,ch);
-  for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){const v=lum[(miny+y)*w+minx+x],p=(y*cw+x)*4;id.data[p]=id.data[p+1]=id.data[p+2]=v;id.data[p+3]=255}
+  for(let i=0;i<cw*ch;i++){const p=i*4;id.data[p]=id.data[p+1]=id.data[p+2]=data[i];id.data[p+3]=255}
   sc.putImageData(id,0,0);
   const S=2,big=document.createElement('canvas');big.width=cw*S+60;big.height=ch*S+60;
   const bc=big.getContext('2d');bc.fillStyle='#fff';bc.fillRect(0,0,big.width,big.height);
@@ -619,12 +661,13 @@ async function getEngine(){
   setStatus('載入辨識字庫中（第一次約需下載十幾 MB，之後會記住）…');
   const mk=async(lang,params)=>{const wk=await Tesseract.createWorker(lang,1);await wk.setParameters(params);return wk};
   const dp={tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789'};
-  const [d1,d2,hw,cw]=await Promise.all([mk('eng',dp),mk('eng',dp),
-    mk('eng',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'XSMLJF0123456789'}),
-    mk('chi_tra',{tessedit_pageseg_mode:'7'})]);
+  const [d1,d2,hw,cw,ew]=await Promise.all([mk('eng',dp),mk('eng',dp),
+    mk('eng',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'XSMLJF#0123456789'}),
+    mk('chi_tra',{tessedit_pageseg_mode:'7'}),
+    mk('eng',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'})]);
   const sched=Tesseract.createScheduler();sched.addWorker(d1);sched.addWorker(d2);
   const clean=r=>(r.data.text||'').replace(/\s+/g,'');
-  engine={digit:c=>sched.addJob('recognize',c).then(clean),head:c=>hw.recognize(c).then(clean),chi:c=>cw.recognize(c).then(clean)};
+  engine={digit:c=>sched.addJob('recognize',c).then(clean),head:c=>hw.recognize(c).then(clean),chi:c=>cw.recognize(c).then(clean),eng:c=>ew.recognize(c).then(clean)};
   return engine;
 }
 
@@ -646,6 +689,13 @@ function resolveHeaders(engs,chis){
       if(cand.length===j-i)for(let k=i;k<j;k++)cols[k]={type:'size',size:cand[k-i]};
     }
     i=j;
+  }
+  // 最後一個尺寸和「合計」之間讀不出來的欄（例如 4XL 讀成「4」），依序補上下一個尺寸
+  for(let k=0;k<cols.length;k++){
+    if(cols[k].type!=='unknown'||!/[\dXL]/i.test(cols[k].raw||'')||/[\u4e00-\u9fff]/.test(cols[k].raw||''))continue;
+    const L=cols[k-1],Rr=cols[k+1];
+    if(L&&L.type==='size'&&(!Rr||Rr.type==='total')){const fam=SIZE_ORDER.filter(z=>sizeFamily(z)===sizeFamily(L.size)),nx=fam[fam.indexOf(L.size)+1];
+      if(nx&&!cols.some(c=>c.type==='size'&&c.size===nx))cols[k]={type:'size',size:nx}}
   }
   const NAME={total:'合計',code:'色號',color:'顏色',product:'品號'};
   return cols.map(c=>c.type==='size'?c.size:NAME[c.type]||c.raw);
@@ -690,47 +740,121 @@ function suggestColor(name,known){
   let best=null,bd=1e9;
   for(const k of known){if(k.length!==name.length)continue;let d=0;for(let i=0;i<k.length;i++)if(k[i]!==name[i])d++;
     if(d<bd){bd=d;best=k}}
-  return best&&bd<=Math.max(1,Math.floor(name.length/3))?best:null;
+  // 兩三個字的顏色（白色、黑色）差一個字就是不同顏色，不校正
+  const lim=name.length<=3?0:name.length<=6?1:2;
+  return best&&bd>0&&bd<=lim?best:null;
 }
 
+// 品號：英文字母、數字用英文模型讀，中文說明用中文模型讀，兩者合併
+function combineCode(chi,eng){
+  const me=String(eng||'').toUpperCase().match(/([A-Z]{1,5})([-_]?[A-Z]?)(\d{2,})([A-Z]?)/);
+  if(!me)return chi;
+  const mc=String(chi||'').match(/(\d{2,})([A-Za-z]?)/);
+  let digits=me[3],trail='';
+  if(mc){const a=mc[1],b=me[3];if(b.startsWith(a))digits=a;else if(a.startsWith(b))digits=b;else digits=a.length>=3?a:b;
+    if(mc[2])trail=me[4]||mc[2].toUpperCase()}
+  const rest=mc?String(chi).slice(mc.index+mc[0].length):'';
+  return me[1]+me[2]+digits+trail+rest;
+}
+const hasCode=t=>/[A-Za-z]/.test(t)&&/\d{2,}/.test(t);
+function knownProducts(){const s=new Set();for(const b of saved)for(const r of extract(b).rows)if(r.product)s.add(r.product);return[...s]}
+// 和以前出現過的品號比對（差一個字以內就校正）
+function suggestProduct(text,known){
+  const sp=splitProduct(text);if(!sp.code||known.includes(sp.code))return null;
+  const dist=(x,y)=>{if(Math.abs(x.length-y.length)>1)return 9;const d=Array.from({length:x.length+1},(_,i)=>[i]);for(let j=1;j<=y.length;j++)d[0][j]=j;
+    for(let i=1;i<=x.length;i++)for(let j=1;j<=y.length;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(x[i-1]===y[j-1]?0:1));return d[x.length][y.length]};
+  // 數字部分必須完全相同（AG1000、AG2000 只差一個數字，不能互相校正），只校正英文字母
+  const dg=x=>(x.match(/\d+/)||[''])[0],lt=x=>x.replace(/\d.*$/,'');
+  const same=known.filter(k=>dg(k)===dg(sp.code));
+  const hit=same.find(k=>sp.code.includes(k)&&k.length>=4)||same.filter(k=>dist(lt(k),lt(sp.code))<=1).sort((a,b)=>b.length-a.length)[0];
+  return hit?hit+(sp.tag||''):null;
+}
+// 用合計反推讀錯的格子：同一組裡「某一列」和「某一欄」差了同樣的數字，交叉的那一格就是讀錯的
+function repairByTotals(g,fixed){
+  const mark=(r,c,nv)=>{const k=r+','+c;if(!(k in fixed))fixed[k]=g[r][c]||'（空白）';g[r][c]=nv>0?String(nv):(nv===0&&g[r][c]==='0'?'0':'')};
+  for(let pass=0;pass<4;pass++){
+    const v=validate(g);if(!v.bad.size)return;
+    const {sizeCols:sc,totalCol:tc}=v,n=r=>{const x=num(g[r][tc]);return x};
+    const rowSum=r=>sc.reduce((a,c)=>a+(num(g[r][c])||0),0);
+    const sets=[];
+    for(let r=1;r<g.length;r++){
+      if(v.kinds[r]==='group'&&v.members[r].length)sets.push([r,v.members[r]]);
+      if(v.kinds[r]==='psum'){const m=v.dataRows.filter(x=>x<r&&v.prodOf[x]===v.psumOf[r]);if(m.length)sets.push([r,m])}
+    }
+    for(let r=1;r<g.length;r++)if(v.kinds[r]==='sum'&&v.dataRows.length)sets.push([r,v.dataRows]);
+    if(!sets.length&&tc>=0)sets.push([-1,v.dataRows]);
+    let changed=false;
+    for(const [cr,mem] of sets){
+      const rowDiff=new Map(),colDiff=new Map();
+      if(tc>=0)for(const m of mem){const t=n(m);if(t!=null&&!Number.isNaN(t)&&t!==rowSum(m))rowDiff.set(m,t-rowSum(m))}
+      if(cr>=0)for(const c of sc){const t=num(g[cr][c]);if(Number.isNaN(t))continue;const s=mem.reduce((a,m)=>a+(num(g[m][c])||0),0);if((t||0)!==s)colDiff.set(c,(t||0)-s)}
+      for(const [m,d] of [...rowDiff]){
+        const cs=[...colDiff].filter(x=>x[1]===d),rs=[...rowDiff].filter(x=>x[1]===d);
+        if(cs.length===1&&rs.length===1){const c=cs[0][0],nv=(num(g[m][c])||0)+d;if(nv>=0){mark(m,c,nv);rowDiff.delete(m);colDiff.delete(c);changed=true}}
+      }
+      // 只有列對不上、各欄都對：讀錯的是該列的合計
+      if(cr>=0&&!colDiff.size)for(const [m] of rowDiff){mark(m,tc,rowSum(m));changed=true}
+      // 只有某欄對不上、各列都對：讀錯的是小計那一格
+      if(cr>=0&&!rowDiff.size&&colDiff.size){
+        const tOk=tc<0||num(g[cr][tc])===mem.reduce((a,m)=>a+rowSum(m),0);
+        if(tOk)for(const [c] of colDiff){mark(cr,c,mem.reduce((a,m)=>a+(num(g[m][c])||0),0));changed=true}
+      }
+    }
+    if(!changed)return;
+  }
+}
 async function processFile(file){
   const {img,url}=await loadImage(file);
   const A=analyse(img);
   const G=detectGrid(A,170)||detectGrid(A,235)||detectByText(A);
   if(!G)throw new Error('認不出表格結構，請上傳清楚的表格截圖');
-  const {src,rowsY,colsX}=G,nR=rowsY.length,nC=colsX.length;
+  const {src,rowsY,colsX}=G,nR=rowsY.length,nC=colsX.length,merged=G.merged||Array(nR).fill(false);
   const cv=(r,c)=>cellCanvas(src,colsX[c][0],rowsY[r][0],colsX[c][1],rowsY[r][1]);
   const E=await getEngine();
   const grid=Array.from({length:nR},()=>Array(nC).fill(''));
-  const fixTxt=t=>t.replace(/（/g,'(').replace(/）/g,')').replace(/[|｜]/g,'');
-  // 1. 表頭
-  const head=[];for(let c=0;c<nC;c++){const x=cv(0,c);if(x)head.push({c,cv:x})}
-  const body=[];for(let r=1;r<nR;r++)for(let c=0;c<nC;c++){const x=cv(r,c);if(x)body.push({r,c,cv:x})}
-  const total=head.length*2+body.length;let done=0;
-  const tick=()=>{done++;setStatus(`辨識「${file.name}」：${done} / ${total} 格`);setBar(done/total)};
-  const engH=Array(nC).fill(''),chiH=Array(nC).fill('');
-  await Promise.all([
-    (async()=>{for(const x of head){chiH[x.c]=fixTxt(await E.chi(x.cv));tick()}})(),
-    (async()=>{for(const x of head){engH[x.c]=await E.head(x.cv);tick()}})()
-  ]);
-  const hs=resolveHeaders(engH,chiH);
-  for(let c=0;c<nC;c++)grid[0][c]=hs[c]||'';
-  // 2. 尺寸欄左邊的是文字欄（品號、顏色），其餘讀數字
-  const firstSize=grid[0].findIndex(t=>classify(t).type==='size');
-  const textCols=[];for(let c=0;c<(firstSize<0?1:firstSize);c++)if(classify(grid[0][c]).type!=='code')textCols.push(c);
-  const tJobs=body.filter(x=>textCols.includes(x.c)),dJobs=body.filter(x=>!textCols.includes(x.c));
-  await Promise.all([
-    (async()=>{for(const x of tJobs){grid[x.r][x.c]=fixTxt(await E.chi(x.cv));tick()}})(),
-    Promise.all(dJobs.map(async x=>{grid[x.r][x.c]=(await E.digit(x.cv)).replace(/\D/g,'');tick()}))
-  ]);
-  const g=grid.filter((row,r)=>r===0||row.some(Boolean));
-  assignTextRoles(g,textCols);
-  autoFixHeaders(g);
-  const L=layout(g);
-  if(L.productCol>=0)for(let r=1;r<g.length;r++){const v=g[r][L.productCol];if(v&&!SUM_RE.test(v))g[r][L.productCol]=cleanCode(v)}
-  const known=knownColors(),fixed={};
-  for(let r=1;r<g.length;r++){const n=g[r][L.colorCol];if(!n||SUM_RE.test(n))continue;const s=suggestColor(n,known);if(s){fixed[r+','+L.colorCol]=n;g[r][L.colorCol]=s}}
-  return{id:'b'+Date.now()+Math.random().toString(36).slice(2,6),label:file.name.replace(/\.[^.]+$/,''),arrival:parseArrival(file.name),imgUrl:url,grid:g,fixed};
+  const fixTxt=t=>t.replace(/（/g,'(').replace(/）/g,')').replace(/[|｜「」]/g,'');
+  let done=0,total=nR*nC;
+  const tick=()=>{done++;setStatus(`辨識「${file.name}」：${Math.min(done,total)} / ${total} 格`);setBar(Math.min(1,done/total))};
+  const readHeaderRow=async r=>{
+    const eng=Array(nC).fill(''),chi=Array(nC).fill('');
+    for(let c=0;c<nC;c++){const x=cv(r,c);if(x){chi[c]=fixTxt(await E.chi(x));eng[c]=await E.head(x);
+      if(hasCode(chi[c])||/\d{3,}/.test(chi[c]))chi[c]=combineCode(chi[c],await E.eng(x))}tick()}
+    return resolveHeaders(eng,chi);
+  };
+  // 1. 合併儲存格的列（表格標題）整列讀成一段文字
+  const readText=async x=>{const t=fixTxt(await E.chi(x));return hasCode(t)||/\d{3,}/.test(t)?combineCode(t,await E.eng(x)):t};
+  for(let r=0;r<nR;r++)if(merged[r]){const x=cellCanvas(src,colsX[0][0],rowsY[r][0],colsX[nC-1][1],rowsY[r][1]);if(x)grid[r][0]=await readText(x);done+=nC;tick()}
+  // 2. 第一個表頭：找出哪幾欄是文字（品號、顏色）
+  const primary=merged.findIndex(m=>!m);
+  if(primary<0)throw new Error('認不出表格結構');
+  grid[primary]=await readHeaderRow(primary);
+  const firstSize=grid[primary].findIndex(t=>classify(t).type==='size');
+  const textCols=[];for(let c=0;c<(firstSize<0?1:firstSize);c++)if(classify(grid[primary][c]).type!=='code')textCols.push(c);
+  // 3. 文字欄
+  for(let r=0;r<nR;r++){if(merged[r]||r===primary)continue;for(const c of textCols){const x=cv(r,c);if(x)grid[r][c]=await readText(x);tick()}}
+  // 4. 其他表頭列（緊接在標題下面、或第一格寫著「顏色」之類的）
+  const isHead=r=>r!==primary&&!merged[r]&&((r>0&&merged[r-1])||textCols.some(c=>COLOR_RE.test(grid[r][c])||PRODUCT_RE.test(grid[r][c])||ROWLABEL_RE.test(grid[r][c])));
+  for(let r=0;r<nR;r++)if(isHead(r)){const h=await readHeaderRow(r);textCols.forEach(c=>{if(!h[c])h[c]=grid[r][c]});grid[r]=h}
+  // 5. 數字
+  const jobs=[];
+  for(let r=0;r<nR;r++){if(merged[r]||r===primary||isHead(r))continue;
+    for(let c=0;c<nC;c++){if(textCols.includes(c))continue;const x=cv(r,c);if(!x){tick();continue}
+      jobs.push(E.digit(x).then(t=>{grid[r][c]=t.replace(/\D/g,'');tick()}))}}
+  await Promise.all(jobs);
+  // 6. 交給和 Excel 相同的表格判讀（多個表格、標題、小計、箱數…）
+  const tables=parseRows(grid);
+  if(!tables.length)throw new Error('找不到尺寸表頭（XS、S、M…）');
+  const known=knownColors(),kp=knownProducts(),base=file.name.replace(/\.[^.]+$/,''),arr=parseArrival(file.name);
+  return tables.map((t,i)=>{
+    const g=t.grid,fixed={},L=layout(g);
+    if(L.productCol>=0)for(let r=1;r<g.length;r++){const v=g[r][L.productCol];if(!v||SUM_RE.test(v)||SUBTOTAL_RE.test(v))continue;
+      g[r][L.productCol]=cleanCode(v);const sp=suggestProduct(g[r][L.productCol],kp);if(sp){fixed[r+','+L.productCol]=g[r][L.productCol];g[r][L.productCol]=sp}}
+    if(L.title){const sp=suggestProduct(L.title,kp);if(sp){fixed['0,0']=L.title;g[0][0]=sp}}
+    repairByTotals(g,fixed);
+    for(let r=1;r<g.length;r++){const nm=g[r][L.colorCol];if(!nm||SUM_RE.test(nm))continue;const sg=suggestColor(nm,known);if(sg){fixed[r+','+L.colorCol]=nm;g[r][L.colorCol]=sg}}
+    const label=base+(tables.length>1?'／'+(t.title||'第'+(i+1)+'段'):'');
+    return{id:'b'+Date.now()+Math.random().toString(36).slice(2,6)+i,label,arrival:t.arrival||arr,imgUrl:url,grid:g,fixed,format:'圖片辨識，'+t.format};
+  });
 }
 
 /* ---------- validation ---------- */
@@ -762,7 +886,7 @@ function validate(g){
       const s=rows.reduce((a,rr)=>a+(c===totalCol?rowSum(rr):(num(g[rr][c])||0)),0);if(s!==v)bad.add(r+','+c)}};
   for(let r=1;r<g.length;r++){if(kinds[r]==='sum')checkAgainst(r,dataRows);if(kinds[r]==='group'&&members[r].length)checkAgainst(r,members[r]);
     if(kinds[r]==='psum'){const m=dataRows.filter(rr=>rr<r&&prodOf[rr]===psumOf[r]);if(m.length)checkAgainst(r,m)}}
-  return{...L,kinds,prodOf,bad,warn,issues:bad.size+warn.size,hasTotal:totalCol>=0};
+  return{...L,kinds,prodOf,members,psumOf,dataRows,bad,warn,issues:bad.size+warn.size,hasTotal:totalCol>=0};
 }
 
 /* ---------- review UI ---------- */
@@ -775,7 +899,7 @@ function renderReview(rv){
   box.innerHTML=`<header><div class="left"><h3></h3><label class="arr">到貨日<input data-arr inputmode="numeric" placeholder="例如 10/22"></label></div><span class="pill"></span></header>
     ${rv.imgUrl?`<details class="src" open><summary>原始圖片（對照用）</summary><img alt="上傳的表格截圖"></details>`:''}
     <div class="legend"><span><b style="background:var(--bad-bg);outline:1px solid var(--bad)"></b>加總對不上，請對照原圖修正</span>
-    <span><b style="background:var(--fix-bg);outline:1px solid var(--tape)"></b>依之前的顏色自動校正／表頭待確認</span>
+    <span><b style="background:var(--fix-bg);outline:1px solid var(--tape)"></b>依合計或之前的顏色自動修正（滑鼠移上去可看原本讀到的）／表頭待確認</span>
     <span>表頭可改成「品號」「顏色」「色號」「合計」或尺寸（如 XL、2XL）；劃線的欄位不會被計入</span></div>
     <div class="scroll"><table class="grid"></table></div>
     <div class="actions"><button class="primary" data-act="save">${rv.editingId?'儲存修改':'加入查詢'}</button><button data-act="drop">${rv.editingId?'取消':'捨棄'}</button></div>`;
@@ -813,7 +937,8 @@ function paint(rv,box){
   const pill=box.querySelector('.pill');
   if(!v.sizeCols.length){pill.className='pill bad';pill.textContent='沒有認出任何尺寸欄，請修改表頭'}
   else if(v.issues){pill.className='pill bad';pill.textContent=`${v.issues} 處待確認`}
-  else{pill.className='pill ok';pill.textContent=v.hasTotal?'加總核對無誤':'無合計欄，無法核對加總'}
+  else{const nf=Object.keys(rv.fixed||{}).length;pill.className='pill ok';
+    pill.textContent=(v.hasTotal?'加總核對無誤':'無合計欄，無法核對加總')+(nf?`（自動修正 ${nf} 格，黃色標示）`:'')}
 }
 function removeReview(rv){const i=reviews.indexOf(rv);if(i>=0)reviews.splice(i,1);$('#rv-'+rv.id)?.remove();if(rv.imgUrl)URL.revokeObjectURL(rv.imgUrl)}
 async function commit(rv,btn){
@@ -835,8 +960,8 @@ async function handleFiles(files){
     try{
       if(isSheet(f)){const list=await processSheetFile(f);list.forEach(rv=>{reviews.push(rv);renderReview(rv)});
         setStatus(`「${f.name}」讀取完成，確認到貨日後按「加入查詢」`);continue}
-      setBar(0);const rv=await processFile(f);reviews.push(rv);renderReview(rv);
-      setStatus(`「${f.name}」辨識完成，請核對紅色格子後按「加入查詢」`)}
+      setBar(0);const list=await processFile(f);list.forEach(rv=>{reviews.push(rv);renderReview(rv)});
+      setStatus(`「${f.name}」辨識完成（${list.length} 個表格），請對照原圖確認紅色、黃色格子後按「加入查詢」`)}
     catch(e){console.error(e);setStatus(`「${f.name}」：${e.message||'辨識失敗'}`)}
   }
   setBar(null);
